@@ -1,0 +1,1 @@
+"""Satellite image classification package."""
