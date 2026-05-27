@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_MODEL_KEY: ${S3_MODEL_KEY:-}
+      MODEL_PATH: ${MODEL_PATH:-checkpoints/best_model.pt}
+    volumes:
+      - ./checkpoints:/app/checkpoints
+      - ./reports:/app/reports
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000

@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.tmp
+__pycache__
+.pytest_cache
+pytest-cache-files-*
+data
+wandb
+reports
+checkpoints/*.pt
+checkpoints/*.pth
