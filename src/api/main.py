@@ -7,6 +7,8 @@ from typing import AsyncIterator
 
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.config import settings
@@ -21,11 +23,21 @@ class PredictionResponse(BaseModel):
     probabilities: dict[str, float]
 
 
+class HealthResponse(BaseModel):
+    ok: bool
+    model_loaded: bool
+    model_path: str
+    classes: list[str]
+
+
+STATIC_DIR = Path(__file__).parent / "static"
+
 app = FastAPI(
     title="Satellite Deforestation Classifier",
     description="Classifies uploaded satellite imagery into EuroSAT land-cover classes.",
     version="1.0.0",
 )
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 model: torch.nn.Module | None = None
 class_names: list[str] = []
@@ -76,9 +88,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app.router.lifespan_context = lifespan
 
 
-@app.get("/health")
-def health() -> dict[str, bool]:
-    return {"ok": True, "model_loaded": model is not None}
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def index() -> str:
+    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse(
+        ok=True,
+        model_loaded=model is not None,
+        model_path=str(settings.model_path),
+        classes=class_names,
+    )
 
 
 @app.post("/predict", response_model=PredictionResponse)

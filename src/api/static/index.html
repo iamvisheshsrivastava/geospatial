@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Satellite Deforestation Classifier</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Satellite ML Inference</p>
+            <h1>Deforestation Classifier</h1>
+          </div>
+          <a class="docs-link" href="/docs" aria-label="Open API docs">API Docs</a>
+        </header>
+
+        <section class="status-strip" aria-live="polite">
+          <div>
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-label">Checking model status...</span>
+          </div>
+          <span id="model-path"></span>
+        </section>
+
+        <section class="content-grid">
+          <form class="upload-panel" id="upload-form">
+            <label class="dropzone" for="image-input" id="dropzone">
+              <input
+                id="image-input"
+                name="file"
+                type="file"
+                accept=".tif,.tiff,.png,.jpg,.jpeg,image/*"
+              />
+              <span class="dropzone-icon" aria-hidden="true">+</span>
+              <strong>Upload satellite image</strong>
+              <small>GeoTIFF, PNG, or JPEG</small>
+            </label>
+
+            <div class="preview-frame">
+              <img id="preview" alt="" />
+              <div id="preview-empty">Image preview appears here</div>
+            </div>
+
+            <button type="submit" id="predict-button">Run Classification</button>
+            <p class="form-message" id="form-message"></p>
+          </form>
+
+          <section class="result-panel" aria-live="polite">
+            <div class="result-heading">
+              <p class="eyebrow">Prediction</p>
+              <h2 id="predicted-class">Waiting for image</h2>
+            </div>
+            <div class="confidence-meter">
+              <div class="meter-label">
+                <span>Confidence</span>
+                <strong id="confidence-label">0%</strong>
+              </div>
+              <div class="meter-track">
+                <div class="meter-fill" id="confidence-fill"></div>
+              </div>
+            </div>
+            <div class="probabilities" id="probabilities"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>

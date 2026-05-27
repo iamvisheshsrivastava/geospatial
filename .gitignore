@@ -14,5 +14,6 @@ checkpoints/*.pth
 reports/*.png
 reports/*.json
 wandb/
+logs/
 
 .DS_Store
