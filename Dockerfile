@@ -19,6 +19,9 @@ COPY scripts/ ./scripts/
 COPY deploy/ ./deploy/
 COPY README.md .
 
+# Verify src/data module is present — fails build if .dockerignore excludes it
+RUN python -c "import src.data.preprocessing; print('src.data OK')"
+
 EXPOSE ${PORT:-8000}
 
 CMD ["sh", "-c", "uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

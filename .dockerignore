@@ -2,11 +2,20 @@
 .github
 .venv
 .tmp
+.env
 __pycache__
+*.pyc
+*.pyo
 .pytest_cache
-pytest-cache-files-*
-/data
+.mypy_cache
+.ruff_cache
 wandb
-reports
+logs
+# Raw dataset files only — NOT src/data/ (source code)
+data/eurosat
+data/raw
+# Large binary artifacts
 checkpoints/*.pt
 checkpoints/*.pth
+reports/*.png
+reports/*.json
