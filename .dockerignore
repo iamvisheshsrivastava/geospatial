@@ -5,7 +5,7 @@
 __pycache__
 .pytest_cache
 pytest-cache-files-*
-data
+/data
 wandb
 reports
 checkpoints/*.pt
