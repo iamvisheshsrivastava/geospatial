@@ -14,13 +14,15 @@ COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
+# cache-bust: 2026-05-29-v2
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY deploy/ ./deploy/
 COPY README.md .
 
-# Verify src/data module is present — fails build if .dockerignore excludes it
-RUN python -c "import src.data.preprocessing; print('src.data OK')"
+# Verify src/data module is present
+RUN python -c "import src.data.preprocessing; print('src.data.preprocessing OK')" \
+ && python -c "import src.data.dataset; print('src.data.dataset OK')"
 
 EXPOSE ${PORT:-8000}
 
