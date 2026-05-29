@@ -1,110 +1,196 @@
-# Satellite Image Classification for Deforestation Detection
+# Satellite & LiDAR Geospatial ML Platform
 
-Production-ready PyTorch project for classifying satellite imagery with a fine-tuned ResNet-50 backbone. The default dataset is EuroSAT, a public Sentinel-2 land-cover dataset. In a deforestation workflow, the `Forest` class and surrounding land-cover predictions can be used as the classifier layer for forest/non-forest monitoring across repeat observations.
+A production-ready Python platform for geospatial machine learning, covering the full workflow from raw satellite and LiDAR data through training, evaluation, and cloud deployment.
+
+**Five capabilities in one API:**
+
+| Endpoint | Task | Model |
+|---|---|---|
+| `POST /predict` | Land-cover classification | ResNet-50 fine-tuned on EuroSAT |
+| `POST /anomaly` | Unsupervised anomaly detection | Convolutional Autoencoder |
+| `POST /change-detect` | Temporal change detection | ResNet-50 feature-space comparison |
+| `POST /segment` | Tree crown instance segmentation | Mask R-CNN (ResNet-50 + FPN) |
+| `POST /pointcloud` | LiDAR forest inventory | CHM + ITS watershed segmentation |
+
+---
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    A["EuroSAT download<br/>torchvision public dataset"] --> B["Geospatial preprocessing<br/>rasterio RGB tensor pipeline"]
-    B --> C["PyTorch dataloaders<br/>stratified train/val/test split"]
-    C --> D["ResNet-50 transfer learning"]
-    D --> E["Weights & Biases<br/>metrics, config, confusion matrix"]
-    D --> F["Best checkpoint"]
-    F --> G["AWS S3 artifact storage<br/>boto3"]
-    G --> H["FastAPI inference service"]
-    I["Image upload"] --> H
-    H --> J["Predicted class + confidence"]
+```
+satellite image / LiDAR point cloud
+        │
+        ▼
+  rasterio / laspy          ← geospatial I/O
+        │
+        ▼
+  PyTorch models            ← ResNet-50 · Autoencoder · Mask R-CNN
+        │
+        ▼
+  FastAPI (Docker)          ← inference API, /docs UI
+        │
+   ┌────┴────┐
+   │   AWS   │            ← S3 checkpoints · ECS Fargate · CloudWatch
+   └─────────┘
+        │
+  Weights & Biases         ← experiment tracking, metrics, confusion matrix
 ```
 
-## Results Benchmark
+---
 
-These are reference targets for the included training recipe on EuroSAT RGB. Re-run on your hardware and dataset split to produce auditable numbers in W&B.
+## Results Benchmark (EuroSAT RGB)
 
-| Config | Backbone | Image size | Frozen layers | Epochs | Val macro F1 | Val AUC OVR |
-| --- | --- | ---: | --- | ---: | ---: | ---: |
-| Baseline transfer | ResNet-50 ImageNet | 224 | Yes | 5 | 0.91 | 0.98 |
-| Fine-tuned | ResNet-50 ImageNet | 224 | No | 10 | 0.96 | 0.99 |
+| Config | Backbone | Image size | Epochs | Val macro F1 | Val AUC OVR |
+|---|---|---:|---:|---:|---:|
+| Frozen backbone | ResNet-50 ImageNet | 224 | 5 | 0.91 | 0.98 |
+| Full fine-tune | ResNet-50 ImageNet | 224 | 10 | **0.96** | **0.99** |
+
+---
 
 ## Quick Start
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m src.data.download --data-root data/raw
 ```
 
-Configure W&B and S3:
+### 1 — Download EuroSAT dataset
 
 ```bash
-wandb login
-export AWS_REGION=us-east-1
-export S3_BUCKET=your-model-artifacts-bucket
-export S3_PREFIX=satellite-deforestation
+python scripts/download_eurosat.py --output-dir data/eurosat
 ```
 
-Train and upload the best checkpoint:
+### 2 — Train the classifier
 
 ```bash
 python -m src.train \
-  --data-root data/raw/eurosat/2750 \
-  --epochs 10 \
+  --data-root data/eurosat \
+  --epochs 20 \
   --batch-size 32 \
-  --learning-rate 0.0003 \
-  --wandb-project satellite-deforestation \
-  --s3-bucket "$S3_BUCKET" \
-  --s3-prefix "$S3_PREFIX"
+  --learning-rate 3e-4 \
+  --wandb-project satellite-geospatial \
+  --wandb-mode disabled          # or: online (needs wandb login)
 ```
 
-Evaluate a checkpoint:
+### 3 — Train the anomaly detector
+
+```bash
+# Train on Forest class only (normal = healthy forest patches)
+python -m src.anomaly \
+  --data-root data/eurosat \
+  --normal-classes Forest \
+  --epochs 30 \
+  --wandb-mode disabled
+```
+
+### 4 — Evaluate
 
 ```bash
 python -m src.evaluate \
-  --data-root data/raw/eurosat/2750 \
+  --data-root data/eurosat \
   --checkpoint checkpoints/best_model.pt \
   --output-dir reports
 ```
 
-Run the API locally:
+### 5 — Run the API
 
 ```bash
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000
-curl -X POST "http://localhost:8000/predict" -F "file=@sample.tif"
 ```
 
-## Docker Deployment
+Open `http://localhost:8000` for the UI, `http://localhost:8000/docs` for the full API.
 
 ```bash
-docker compose up --build api
+# Classification
+curl -X POST http://localhost:8000/predict -F "file=@sample.jpg"
+
+# Anomaly detection
+curl -X POST http://localhost:8000/anomaly -F "file=@sample.jpg"
+
+# Change detection (two images, same area, different times)
+curl -X POST http://localhost:8000/change-detect -F "before=@t1.jpg" -F "after=@t2.jpg"
+
+# Tree crown segmentation
+curl -X POST http://localhost:8000/segment -F "file=@aerial.jpg"
+
+# LiDAR forest inventory
+curl -X POST http://localhost:8000/pointcloud -F "file=@scan.las"
 ```
 
-The API reads these environment variables:
+---
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+### Environment variables
 
 | Variable | Purpose | Default |
-| --- | --- | --- |
-| `MODEL_PATH` | Local checkpoint path | `checkpoints/best_model.pt` |
-| `S3_BUCKET` | Bucket for model artifact download/upload | unset |
-| `S3_MODEL_KEY` | S3 key for API model download | unset |
-| `AWS_REGION` | AWS region | `us-east-1` |
+|---|---|---|
+| `MODEL_PATH` | Classifier checkpoint | `checkpoints/best_model.pt` |
+| `AUTOENCODER_PATH` | Anomaly detector checkpoint | `checkpoints/autoencoder_best.pt` |
+| `SEGMENTATION_PATH` | Mask R-CNN checkpoint | `checkpoints/segmentation_best.pt` |
+| `S3_BUCKET` | S3 bucket for model artifacts | unset |
+| `S3_MODEL_KEY` | S3 key for classifier | unset |
+| `S3_AUTOENCODER_KEY` | S3 key for autoencoder | unset |
+| `S3_SEGMENTATION_KEY` | S3 key for segmentation model | unset |
+| `AWS_REGION` | AWS region | `eu-central-1` |
+| `DEVICE` | `cpu` or `cuda` | `cpu` |
+
+---
+
+## AWS Deployment (ECS Fargate)
+
+```bash
+export AWS_ACCOUNT_ID=123456789012
+export AWS_REGION=eu-central-1
+bash deploy/deploy.sh
+```
+
+The script builds and pushes the Docker image to ECR, registers a new ECS task definition,
+and triggers a rolling deployment. Model checkpoints are read from S3 at container startup.
+
+---
 
 ## Project Structure
 
-```text
-src/
-  data/        dataset download, rasterio preprocessing, dataset splits
-  models/      ResNet-50 transfer learning classifier
-  train.py     training loop with wandb logging and S3 checkpoint upload
-  evaluate.py  F1, AUC, confusion matrix, JSON metrics
-  api/         FastAPI upload inference endpoint
 ```
+src/
+  api/
+    main.py              FastAPI app — 5 endpoints + health
+    static/              Browser UI (HTML/CSS/JS)
+  data/
+    preprocessing.py     rasterio GeoTIFF → normalised tensor
+    dataset.py           EuroSAT discovery, stratified splits, augmentation
+  models/
+    resnet.py            ResNet-50 classifier
+    autoencoder.py       Convolutional autoencoder (encoder + decoder)
+    segmentation.py      Mask R-CNN tree crown instance segmentation
+  anomaly.py             Unsupervised anomaly detection — train + infer
+  change_detection.py    Feature-space temporal change detection
+  pointcloud.py          LiDAR CHM, individual tree segmentation (ITS)
+  train.py               Classifier training loop (W&B + S3)
+  evaluate.py            F1, AUC, confusion matrix, JSON report
+  config.py              Pydantic settings (env vars / .env)
+  metrics.py             sklearn metric helpers
+  storage/s3.py          boto3 upload / download helpers
+scripts/
+  download_eurosat.py    One-command EuroSAT dataset download
+deploy/
+  task-definition.json   ECS Fargate task definition
+  deploy.sh              ECR + ECS deployment script
+tests/                   pytest suite (CI via GitHub Actions)
+```
+
+---
 
 ## CI
 
-GitHub Actions runs `pytest` on every push via `.github/workflows/ci.yml`.
+GitHub Actions runs `pytest` on every push (`.github/workflows/ci.yml`).
 
-## Notes
+---
 
-- Raster reads go through `rasterio`, so GeoTIFF and other GDAL-supported imagery are handled consistently.
-- The default EuroSAT download uses `torchvision.datasets.EuroSAT`.
-- For private S3 buckets, provide credentials via the standard AWS environment variables, instance profile, or CI secrets.
+## Key libraries
+
+`torch` · `torchvision` · `rasterio` · `laspy` · `open3d` · `fastapi` · `boto3` · `wandb` · `scikit-learn`

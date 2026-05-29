@@ -22,6 +22,7 @@ def test_health_includes_model_metadata() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
-    assert "model_loaded" in payload
+    assert "classifier_loaded" in payload
+    assert "anomaly_detector_loaded" in payload
     assert "model_path" in payload
     assert "classes" in payload

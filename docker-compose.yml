@@ -4,10 +4,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_MODEL_KEY: ${S3_MODEL_KEY:-}
+      S3_AUTOENCODER_KEY: ${S3_AUTOENCODER_KEY:-}
+      S3_SEGMENTATION_KEY: ${S3_SEGMENTATION_KEY:-}
       MODEL_PATH: ${MODEL_PATH:-checkpoints/best_model.pt}
+      AUTOENCODER_PATH: ${AUTOENCODER_PATH:-checkpoints/autoencoder_best.pt}
+      SEGMENTATION_PATH: ${SEGMENTATION_PATH:-checkpoints/segmentation_best.pt}
+      DEVICE: ${DEVICE:-cpu}
     volumes:
       - ./checkpoints:/app/checkpoints
       - ./reports:/app/reports

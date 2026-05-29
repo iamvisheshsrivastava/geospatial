@@ -1,0 +1,46 @@
+{
+  "family": "satellite-geospatial-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/satellite-geospatial:latest",
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "DEVICE",         "value": "cpu" },
+        { "name": "IMAGE_SIZE",     "value": "224" },
+        { "name": "AWS_REGION",     "value": "eu-central-1" }
+      ],
+      "secrets": [
+        { "name": "S3_BUCKET",         "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/geospatial/S3_BUCKET" },
+        { "name": "S3_MODEL_KEY",      "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/geospatial/S3_MODEL_KEY" },
+        { "name": "S3_AUTOENCODER_KEY","valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/geospatial/S3_AUTOENCODER_KEY" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/satellite-geospatial-api",
+          "awslogs-region": "eu-central-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 15
+      }
+    }
+  ]
+}
