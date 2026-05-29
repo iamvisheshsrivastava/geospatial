@@ -14,9 +14,9 @@ COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
-COPY src ./src
-COPY scripts ./scripts
-COPY deploy ./deploy
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY deploy/ ./deploy/
 COPY README.md .
 
 EXPOSE ${PORT:-8000}
