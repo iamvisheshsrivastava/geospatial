@@ -1,5 +1,7 @@
 # Satellite & LiDAR Geospatial ML Platform
 
+> **Live demo:** [api-production-3378.up.railway.app](https://api-production-3378.up.railway.app) · [Interactive API docs](https://api-production-3378.up.railway.app/docs)
+
 A production-ready Python platform for geospatial machine learning, covering the full workflow from raw satellite and LiDAR data through training, evaluation, and cloud deployment.
 
 **Five capabilities in one API:**
@@ -20,19 +22,18 @@ A production-ready Python platform for geospatial machine learning, covering the
 satellite image / LiDAR point cloud
         │
         ▼
-  rasterio / laspy          ← geospatial I/O
+  rasterio / laspy          ← geospatial I/O (GeoTIFF, LAS/LAZ)
         │
         ▼
   PyTorch models            ← ResNet-50 · Autoencoder · Mask R-CNN
         │
         ▼
-  FastAPI (Docker)          ← inference API, /docs UI
+  FastAPI (Docker)          ← inference API + browser UI
         │
-   ┌────┴────┐
-   │   AWS   │            ← S3 checkpoints · ECS Fargate · CloudWatch
-   └─────────┘
+        ▼
+  Railway (cloud)           ← containerised deployment, live public URL
         │
-  Weights & Biases         ← experiment tracking, metrics, confusion matrix
+  Weights & Biases          ← experiment tracking, metrics, confusion matrix
 ```
 
 ---
@@ -68,7 +69,7 @@ python -m src.train \
   --batch-size 32 \
   --learning-rate 3e-4 \
   --wandb-project satellite-geospatial \
-  --wandb-mode disabled          # or: online (needs wandb login)
+  --wandb-mode disabled
 ```
 
 ### 3 — Train the anomaly detector
@@ -91,7 +92,7 @@ python -m src.evaluate \
   --output-dir reports
 ```
 
-### 5 — Run the API
+### 5 — Run the API locally
 
 ```bash
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000
@@ -128,6 +129,7 @@ docker compose up --build
 
 | Variable | Purpose | Default |
 |---|---|---|
+| `PORT` | Port the server listens on | `8000` |
 | `MODEL_PATH` | Classifier checkpoint | `checkpoints/best_model.pt` |
 | `AUTOENCODER_PATH` | Anomaly detector checkpoint | `checkpoints/autoencoder_best.pt` |
 | `SEGMENTATION_PATH` | Mask R-CNN checkpoint | `checkpoints/segmentation_best.pt` |
@@ -140,16 +142,17 @@ docker compose up --build
 
 ---
 
-## AWS Deployment (ECS Fargate)
+## Deployment (Railway)
+
+The live API is deployed on [Railway](https://railway.app) using Docker.
 
 ```bash
-export AWS_ACCOUNT_ID=123456789012
-export AWS_REGION=eu-central-1
-bash deploy/deploy.sh
+# railway.toml already configured — just push to main
+git push origin main
+# Railway auto-deploys on every push
 ```
 
-The script builds and pushes the Docker image to ECR, registers a new ECS task definition,
-and triggers a rolling deployment. Model checkpoints are read from S3 at container startup.
+For AWS ECS Fargate deployment, see `deploy/deploy.sh` and `deploy/task-definition.json`.
 
 ---
 
@@ -178,8 +181,8 @@ src/
 scripts/
   download_eurosat.py    One-command EuroSAT dataset download
 deploy/
-  task-definition.json   ECS Fargate task definition
-  deploy.sh              ECR + ECS deployment script
+  task-definition.json   ECS Fargate task definition (optional AWS path)
+  deploy.sh              ECR + ECS deployment script (optional AWS path)
 tests/                   pytest suite (CI via GitHub Actions)
 ```
 
