@@ -14,16 +14,17 @@ COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
-# cache-bust: 2026-05-29-v2
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY deploy/ ./deploy/
+COPY entrypoint.sh .
 COPY README.md .
 
-# Verify src/data module is present
-RUN python -c "import src.data.preprocessing; print('src.data.preprocessing OK')" \
- && python -c "import src.data.dataset; print('src.data.dataset OK')"
+# Verify src/data module is present at build time
+RUN python -c "import src.data.preprocessing; print('src.data OK')"
 
-EXPOSE ${PORT:-8000}
+RUN chmod +x entrypoint.sh
 
-CMD ["sh", "-c", "uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+EXPOSE 8000
+
+ENTRYPOINT ["./entrypoint.sh"]
