@@ -37,7 +37,7 @@ def main() -> None:
         image_size=args.image_size,
         seed=args.seed,
     )
-    checkpoint = torch.load(args.checkpoint, map_location=device)
+    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
     class_names = checkpoint.get("class_names", discovered_class_names)
 
     model = build_resnet50_classifier(num_classes=len(class_names), pretrained=False)

@@ -136,7 +136,7 @@ def _ensure_file(local_path: Path, s3_key: str | None) -> Path:
 def load_classifier() -> None:
     global classifier, class_names
     path = _ensure_file(settings.model_path, settings.s3_model_key)
-    ckpt = torch.load(path, map_location=device)
+    ckpt = torch.load(path, map_location=device, weights_only=False)
     class_names = ckpt["class_names"]
     model = build_resnet50_classifier(num_classes=len(class_names), pretrained=False)
     model.load_state_dict(ckpt["model_state_dict"])

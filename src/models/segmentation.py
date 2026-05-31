@@ -121,7 +121,7 @@ def run_segmentation(
 def load_segmentation_model(checkpoint_path: Path, device: torch.device, num_classes: int = 2) -> nn.Module:
     """Load a fine-tuned Mask R-CNN checkpoint."""
     model = build_tree_segmentation_model(num_classes=num_classes, pretrained_backbone=False)
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = ckpt.get("model_state_dict", ckpt)
     model.load_state_dict(state)
     model.to(device).eval()

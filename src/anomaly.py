@@ -154,7 +154,7 @@ def train_autoencoder(
 # ---------------------------------------------------------------------------
 
 def load_autoencoder(checkpoint_path: Path, device: torch.device) -> tuple[SatelliteAutoencoder, int]:
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     latent_dim = ckpt.get("latent_dim", 512)
     image_size = ckpt.get("image_size", 224)
     model = build_autoencoder(latent_dim=latent_dim).to(device)
