@@ -15,7 +15,6 @@ from src.config import settings
 from src.data.dataset import create_datasets
 from src.metrics import classification_metrics
 from src.models.resnet import build_resnet50_classifier
-from src.storage.s3 import upload_file_to_s3
 
 
 def parse_args() -> argparse.Namespace:
@@ -178,6 +177,7 @@ def main() -> None:
     history_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
 
     if args.s3_bucket:
+        from src.storage.s3 import upload_file_to_s3
         s3_key = f"{args.s3_prefix.rstrip('/')}/best_model.pt"
         artifact_uri = upload_file_to_s3(best_path, args.s3_bucket, s3_key, args.aws_region)
         wandb.summary["best_model_s3_uri"] = artifact_uri

@@ -24,7 +24,6 @@ import wandb
 from src.config import settings
 from src.data.preprocessing import preprocess_image
 from src.models.autoencoder import build_autoencoder, SatelliteAutoencoder
-from src.storage.s3 import upload_file_to_s3
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +138,7 @@ def train_autoencoder(
             )
 
     if s3_bucket:
+        from src.storage.s3 import upload_file_to_s3
         key = f"{s3_prefix.rstrip('/')}/autoencoder_best.pt"
         uri = upload_file_to_s3(best_path, s3_bucket, key, aws_region)
         wandb.summary["autoencoder_s3_uri"] = uri
