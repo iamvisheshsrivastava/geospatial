@@ -47,12 +47,19 @@ satellite image / LiDAR point cloud
 
 ---
 
-## Quick Start
+## Train on Google Colab (recommended — free GPU)
 
-```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+If you don't have a local GPU, use the provided notebook to train on a free T4 GPU in the cloud:
+
+1. Open [train_on_colab.ipynb](train_on_colab.ipynb) in [Google Colab](https://colab.research.google.com)
+2. Set **Runtime → Change runtime type → T4 GPU**
+3. Run all cells (~25 minutes)
+
+The notebook downloads EuroSAT, trains both models, and saves the checkpoints to your Google Drive. No API keys or cloud accounts needed beyond a Google account.
+
+---
+
+## Quick Start (local)
 
 ### 1 — Download EuroSAT dataset
 
