@@ -8,6 +8,10 @@ pytest-cache-files-*/
 .mypy_cache/
 .ruff_cache/
 
+# Claude Code internal files — never commit these
+.claude/
+CLAUDE.md
+
 /data/
 checkpoints/*.pt
 checkpoints/*.pth
@@ -16,4 +20,9 @@ reports/*.json
 wandb/
 logs/
 
+# Notebook output figures are generated — don't commit them
+figures/*.png
+figures/*.jpg
+
 .DS_Store
+Thumbs.db
