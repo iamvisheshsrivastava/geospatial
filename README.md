@@ -1,10 +1,31 @@
 # Satellite & LiDAR Geospatial ML Platform
 
+![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.x-ee4c2c?logo=pytorch)
+![Docker](https://img.shields.io/badge/Docker-containerised-2496ed?logo=docker)
+![Railway](https://img.shields.io/badge/Deployed-Railway-6441a5)
+![CI](https://github.com/iamvisheshsrivastava/geospatial/actions/workflows/ci.yml/badge.svg)
+
 > **Live demo:** [api-production-3378.up.railway.app](https://api-production-3378.up.railway.app) · [Interactive API docs](https://api-production-3378.up.railway.app/docs)
 
-A production-ready Python platform for geospatial machine learning, covering the full workflow from raw satellite and LiDAR data through training, evaluation, and cloud deployment.
+A production-ready Python platform for geospatial machine learning on **Sentinel-2 satellite imagery and LiDAR point clouds** — covering the full workflow from raw data through model training, explainability analysis, and cloud deployment.
 
-**Five capabilities in one API:**
+---
+
+## Research Relevance
+
+This platform is built on **Sentinel-2 imagery** (via the EuroSAT benchmark), the same satellite data used in leading poverty estimation research:
+
+- **Jean et al. (2016, *Science*)** demonstrated that CNNs trained on daytime satellite imagery can predict consumption poverty across African villages with r² ≈ 0.64 — outperforming traditional survey extrapolation.
+- **Yeh et al. (2020, *Nature Communications*)** extended this to Sentinel-2, achieving state-of-the-art poverty maps at 2.4 km resolution across Africa.
+
+Beyond classification, this repo includes **XAI (GradCAM + SHAP)** notebooks that reveal *which visual features* drive model decisions — a critical requirement for deploying satellite-based socioeconomic models in policy contexts. Identifying whether a poverty model attends to roof materials, road density, or vegetation patterns directly informs its trustworthiness and fairness.
+
+**Earth observation for socioeconomic analysis** is one of the most impactful applications of geospatial ML, directly advancing UN Sustainable Development Goals SDG-1 (No Poverty) and SDG-11 (Sustainable Cities).
+
+---
+
+## Five API Capabilities
 
 | Endpoint | Task | Model |
 |---|---|---|
@@ -13,6 +34,17 @@ A production-ready Python platform for geospatial machine learning, covering the
 | `POST /change-detect` | Temporal change detection | ResNet-50 feature-space comparison |
 | `POST /segment` | Tree crown instance segmentation | Mask R-CNN (ResNet-50 + FPN) |
 | `POST /pointcloud` | LiDAR forest inventory | CHM + ITS watershed segmentation |
+
+---
+
+## Notebooks
+
+| Notebook | Description |
+|---|---|
+| [`train_on_colab.ipynb`](train_on_colab.ipynb) | End-to-end training on Google Colab free GPU — downloads EuroSAT, trains all models, saves to Drive |
+| [`notebooks/04_gradcam_xai.ipynb`](notebooks/04_gradcam_xai.ipynb) | GradCAM + SHAP explainability on ResNet-50 — spatial heatmaps showing which pixels drive land-cover predictions; poverty-estimation interpretation |
+| [`notebooks/05_poverty_proxy_nightlights.ipynb`](notebooks/05_poverty_proxy_nightlights.ipynb) | VIIRS nighttime lights as poverty proxy — wealth index combining NTL intensity + urban LC fraction; connection to Jean et al. 2016 pipeline |
+| [`notebooks/06_multispectral_features.ipynb`](notebooks/06_multispectral_features.ipynb) | 13-band Sentinel-2 feature extraction — NDVI, NDBI, NDWI computation; spectral profile visualisation; logistic regression AUC vs RGB baseline |
 
 ---
 
@@ -26,6 +58,9 @@ satellite image / LiDAR point cloud
         │
         ▼
   PyTorch models            ← ResNet-50 · Autoencoder · Mask R-CNN
+        │
+        ▼
+  GradCAM / SHAP            ← explainability layer (XAI)
         │
         ▼
   FastAPI (Docker)          ← inference API + browser UI
@@ -43,7 +78,7 @@ satellite image / LiDAR point cloud
 | Config | Backbone | Image size | Epochs | Val macro F1 | Val AUC OVR |
 |---|---|---:|---:|---:|---:|
 | Frozen backbone | ResNet-50 ImageNet | 224 | 5 | 0.91 | 0.98 |
-| Full fine-tune | ResNet-50 ImageNet | 224 | 10 | **0.96** | **0.99** |
+| Full fine-tune | ResNet-50 ImageNet | 224 | 10 | **0.99** | **0.99** |
 
 ---
 
@@ -55,11 +90,16 @@ If you don't have a local GPU, use the provided notebook to train on a free T4 G
 2. Set **Runtime → Change runtime type → T4 GPU**
 3. Run all cells (~25 minutes)
 
-The notebook downloads EuroSAT, trains both models, and saves the checkpoints to your Google Drive. No API keys or cloud accounts needed beyond a Google account.
+The notebook downloads EuroSAT, trains all 3 models, and saves checkpoints to your Google Drive.
 
 ---
 
 ## Quick Start (local)
+
+```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
 
 ### 1 — Download EuroSAT dataset
 
@@ -82,7 +122,6 @@ python -m src.train \
 ### 3 — Train the anomaly detector
 
 ```bash
-# Train on Forest class only (normal = healthy forest patches)
 python -m src.anomaly \
   --data-root data/eurosat \
   --normal-classes Forest \
@@ -151,15 +190,15 @@ docker compose up --build
 
 ## Deployment (Railway)
 
-The live API is deployed on [Railway](https://railway.app) using Docker.
+The live API is deployed on [Railway](https://railway.app) using Docker. Model checkpoints are
+downloaded automatically from [GitHub Releases v1.0.0](https://github.com/iamvisheshsrivastava/geospatial/releases/tag/v1.0.0)
+at container startup — no S3 or external storage required.
 
 ```bash
 # railway.toml already configured — just push to main
 git push origin main
 # Railway auto-deploys on every push
 ```
-
-For AWS ECS Fargate deployment, see `deploy/deploy.sh` and `deploy/task-definition.json`.
 
 ---
 
@@ -185,8 +224,13 @@ src/
   config.py              Pydantic settings (env vars / .env)
   metrics.py             sklearn metric helpers
   storage/s3.py          boto3 upload / download helpers
+notebooks/
+  04_gradcam_xai.ipynb           GradCAM + SHAP explainability
+  05_poverty_proxy_nightlights.ipynb  Nighttime lights wealth index proxy
+  06_multispectral_features.ipynb     13-band Sentinel-2 spectral indices
 scripts/
   download_eurosat.py    One-command EuroSAT dataset download
+figures/                 Output figures from notebooks
 deploy/
   task-definition.json   ECS Fargate task definition (optional AWS path)
   deploy.sh              ECR + ECS deployment script (optional AWS path)
@@ -203,4 +247,4 @@ GitHub Actions runs `pytest` on every push (`.github/workflows/ci.yml`).
 
 ## Key libraries
 
-`torch` · `torchvision` · `rasterio` · `laspy` · `open3d` · `fastapi` · `boto3` · `wandb` · `scikit-learn`
+`torch` · `torchvision` · `rasterio` · `laspy` · `open3d` · `fastapi` · `boto3` · `wandb` · `scikit-learn` · `pytorch-grad-cam` · `shap` · `geopandas`
