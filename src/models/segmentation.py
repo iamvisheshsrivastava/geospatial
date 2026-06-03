@@ -119,10 +119,30 @@ def run_segmentation(
 
 
 def load_segmentation_model(checkpoint_path: Path, device: torch.device, num_classes: int = 2) -> nn.Module:
-    """Load a fine-tuned Mask R-CNN checkpoint."""
-    model = build_tree_segmentation_model(num_classes=num_classes, pretrained_backbone=False)
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    """Load a Mask R-CNN checkpoint, auto-detecting num_classes from the weights.
+
+    Handles both:
+    - Full COCO pretrained checkpoint (91 classes, saved via torch.save(model.state_dict()))
+    - Fine-tuned tree crown checkpoint (2 classes: background + tree)
+    """
+    ckpt  = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = ckpt.get("model_state_dict", ckpt)
+
+    # Detect num_classes from the box predictor weight shape
+    cls_key = "roi_heads.box_predictor.cls_score.weight"
+    if cls_key in state:
+        detected_classes = state[cls_key].shape[0]
+    else:
+        detected_classes = num_classes
+
+    if detected_classes == 91:
+        # Standard COCO pretrained — load directly without replacing heads
+        model = maskrcnn_resnet50_fpn(weights=None)
+    else:
+        model = build_tree_segmentation_model(
+            num_classes=detected_classes, pretrained_backbone=False
+        )
+
     model.load_state_dict(state)
     model.to(device).eval()
     return model
