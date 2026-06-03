@@ -11,7 +11,7 @@ def test_index_serves_ui() -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Deforestation Classifier" in response.text
+    assert "Geospatial ML Platform" in response.text
 
 
 def test_health_includes_model_metadata() -> None:
