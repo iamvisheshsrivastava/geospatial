@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 wget dos2unix \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 wget \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -23,7 +23,21 @@ COPY README.md .
 # Verify src/data module is present at build time
 RUN python -c "import src.data.preprocessing; print('src.data OK')"
 
-RUN dos2unix entrypoint.sh && chmod +x entrypoint.sh
+# Download model checkpoints at BUILD TIME so they are baked into the image.
+# This is more reliable than downloading at container startup — no runtime
+# network issues, no shell script problems, no startup timeouts.
+RUN RELEASE="https://github.com/iamvisheshsrivastava/geospatial/releases/download/v1.0.0" \
+    && mkdir -p checkpoints \
+    && echo "Downloading best_model.pt ..." \
+    && wget -q --show-progress -O checkpoints/best_model.pt         "$RELEASE/best_model.pt" \
+    && echo "Downloading autoencoder_best.pt ..." \
+    && wget -q --show-progress -O checkpoints/autoencoder_best.pt   "$RELEASE/autoencoder_best.pt" \
+    && echo "Downloading segmentation_best.pt ..." \
+    && wget -q --show-progress -O checkpoints/segmentation_best.pt  "$RELEASE/segmentation_best.pt" \
+    && echo "All checkpoints downloaded." \
+    && ls -lh checkpoints/
+
+RUN chmod +x entrypoint.sh
 
 EXPOSE 8000
 
