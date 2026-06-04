@@ -114,7 +114,7 @@ autoencoder_image_size: int = settings.image_size
 device = torch.device(settings.device)
 
 # Default thresholds — tuned after training; can be overridden via query params
-_DEFAULT_ANOMALY_THRESHOLD = 0.05
+_DEFAULT_ANOMALY_THRESHOLD = 0.6
 _DEFAULT_CHANGE_THRESHOLD = 0.15
 
 
@@ -314,13 +314,32 @@ async def segment(
     confidence scores, and mask areas. Designed for forestry inventory workflows.
 
     The model is loaded lazily on first call and unloaded after inference to
-    conserve memory on constrained deployment environments.
+    conserve memory on constrained deployment environments (Railway 512 MB limit).
+    The lightweight classifier and autoencoder are temporarily freed to make room.
     """
-    # Lazy-load segmentation model on first request
+    import gc
+
+    # Lazy-load segmentation model on first request.
+    # Free the two always-resident models first so Mask R-CNN (~200 MB) fits in RAM.
     if segmentation_model is None:
+        global classifier, autoencoder
+        classifier = None
+        autoencoder = None
+        # Also free the change-detection ResNet encoder if it was loaded.
+        try:
+            from src.change_detection import unload_encoder as _unload_cd
+            _unload_cd()
+        except Exception:
+            pass
+        gc.collect()
         try:
             load_segmentation()
         except FileNotFoundError:
+            # Reload the lightweight models before surfacing the error.
+            try: load_classifier()
+            except Exception: pass
+            try: load_anomaly_detector()
+            except Exception: pass
             raise HTTPException(status_code=503, detail="Segmentation model not loaded.")
 
     content = await file.read()
@@ -338,8 +357,14 @@ async def segment(
         raise HTTPException(status_code=400, detail=f"Segmentation failed: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
-        # Unload Mask R-CNN immediately after inference to free ~200 MB RAM
+        # Unload Mask R-CNN immediately after inference to free ~200 MB RAM,
+        # then reload the lightweight models.
         unload_segmentation()
+        gc.collect()
+        try: load_classifier()
+        except Exception: pass
+        try: load_anomaly_detector()
+        except Exception: pass
 
 
 @app.post("/pointcloud", response_model=PointCloudResponse)
