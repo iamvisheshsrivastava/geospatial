@@ -7,14 +7,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            forest: { DEFAULT: '#1a7a50', light: '#e8f5ee', dark: '#145f3e' },
-            slate:  { 50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1', 400: '#94a3b8', 500: '#64748b', 600: '#475569', 700: '#334155', 800: '#1e293b', 900: '#0f172a' }
-          }
-        }
-      }
+      theme: { extend: { colors: {
+        forest: { DEFAULT: '#1a7a50', light: '#e8f5ee', dark: '#145f3e' }
+      }}}
     }
   </script>
   <style>
@@ -26,6 +21,7 @@
     .dropzone-hover { border-color: #1a7a50 !important; background: #e8f5ee !important; }
     .heatmap-canvas { image-rendering: pixelated; }
     .prob-bar { transition: width 0.4s ease; }
+    .progress-bar { transition: width 0.15s ease; }
     @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
     .loading-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
   </style>
@@ -36,7 +32,7 @@
   <header class="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-forest rounded-lg flex items-center justify-center text-white text-sm font-bold">🛰</div>
+        <div class="w-8 h-8 bg-forest rounded-lg flex items-center justify-center text-white text-sm">🛰</div>
         <div>
           <div class="font-bold text-slate-800 leading-tight">Geospatial ML Platform</div>
           <div class="text-xs text-slate-500">Sentinel-2 Satellite & LiDAR Analysis</div>
@@ -58,7 +54,6 @@
       <p class="text-sm text-forest font-semibold uppercase tracking-wide mb-1">Earth Observation · Deep Learning</p>
       <h1 class="text-2xl font-bold text-slate-800 mb-2">Five AI capabilities on satellite & LiDAR data</h1>
       <p class="text-slate-500 text-sm max-w-2xl">Upload a satellite image or LiDAR scan and get instant AI-powered analysis. Built on Sentinel-2 imagery (EuroSAT benchmark, F1 = 0.99) with PyTorch models deployed on Railway.</p>
-      <!-- Capability pills -->
       <div class="flex flex-wrap gap-2 mt-3">
         <span class="text-xs px-2.5 py-1 bg-forest-light text-forest rounded-full font-medium">🌍 Land Cover Classification</span>
         <span class="text-xs px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full font-medium">⚠️ Anomaly Detection</span>
@@ -69,58 +64,66 @@
     </div>
   </div>
 
-  <!-- Main content -->
   <div class="max-w-6xl mx-auto px-4 py-6">
 
-    <!-- Tab navigation -->
+    <!-- Tabs -->
     <div class="flex gap-1 bg-slate-100 rounded-xl p-1 mb-6 overflow-x-auto">
-      <button class="tab-btn active flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all" data-tab="classify">
-        🌍 Classify
-      </button>
-      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="anomaly">
-        ⚠️ Anomaly
-      </button>
-      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="change">
-        🔄 Change Detection
-      </button>
-      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="segment">
-        🌲 Segmentation
-      </button>
-      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="lidar">
-        📡 LiDAR
-      </button>
+      <button class="tab-btn active flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all" data-tab="classify">🌍 Classify</button>
+      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="anomaly">⚠️ Anomaly</button>
+      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="change">🔄 Change Detection</button>
+      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="segment">🌲 Segmentation</button>
+      <button class="tab-btn flex-1 min-w-max text-sm font-medium px-3 py-2 rounded-lg transition-all text-slate-600" data-tab="lidar">📡 LiDAR</button>
     </div>
 
     <!-- ── TAB 1: CLASSIFY ── -->
     <div id="tab-classify" class="tab-panel active">
       <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <!-- Info card -->
         <div class="lg:col-span-5 bg-forest-light border border-forest/20 rounded-xl p-4 flex gap-3">
           <span class="text-2xl">🌍</span>
           <div>
             <div class="font-semibold text-forest">Land Cover Classification</div>
-            <div class="text-sm text-slate-600 mt-0.5">Upload a satellite image and the model predicts which of 10 land cover types it is: Forest, Residential, Highway, Industrial, Annual Crop, Pasture, Permanent Crop, Herbaceous Vegetation, River, or Sea/Lake. ResNet-50 fine-tuned on 27,000 Sentinel-2 patches.</div>
+            <div class="text-sm text-slate-600 mt-0.5">Upload a satellite image and the model predicts which of 10 land cover types it is: Forest, Residential, Highway, Industrial, Annual Crop, Pasture, Permanent Crop, Herbaceous Vegetation, River, or Sea/Lake. ResNet-50 fine-tuned on 27,000 Sentinel-2 patches — F1 = 0.99.</div>
           </div>
         </div>
-        <!-- Upload -->
+
         <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
-          <label class="block text-sm font-semibold text-slate-700 mb-3">Upload Satellite Image</label>
-          <div id="dropzone-classify" class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer transition-all hover:border-forest hover:bg-forest-light">
-            <input id="file-classify" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
-            <div class="text-3xl mb-2">🛰️</div>
-            <div class="text-sm font-medium text-slate-600">Drop image here or click to browse</div>
-            <div class="text-xs text-slate-400 mt-1">GeoTIFF · PNG · JPEG</div>
+          <!-- Sample images -->
+          <div class="mb-4">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Try a sample</div>
+            <div class="flex flex-wrap gap-1.5">
+              <button class="sample-classify text-xs px-2 py-1 bg-forest-light text-forest rounded-md hover:bg-green-100 border border-forest/20" data-file="forest.jpg" data-label="Forest">🌲 Forest</button>
+              <button class="sample-classify text-xs px-2 py-1 bg-forest-light text-forest rounded-md hover:bg-green-100 border border-forest/20" data-file="residential.jpg" data-label="Residential">🏘️ Residential</button>
+              <button class="sample-classify text-xs px-2 py-1 bg-forest-light text-forest rounded-md hover:bg-green-100 border border-forest/20" data-file="crop.jpg" data-label="Crop">🌾 Crop</button>
+              <button class="sample-classify text-xs px-2 py-1 bg-forest-light text-forest rounded-md hover:bg-green-100 border border-forest/20" data-file="highway.jpg" data-label="Highway">🛣️ Highway</button>
+              <button class="sample-classify text-xs px-2 py-1 bg-forest-light text-forest rounded-md hover:bg-green-100 border border-forest/20" data-file="sealake.jpg" data-label="Sea/Lake">🌊 Sea/Lake</button>
+            </div>
           </div>
-          <div id="preview-classify" class="mt-3 hidden">
-            <img id="img-classify" class="w-full h-40 object-contain rounded-lg border border-slate-200 bg-slate-50" />
-            <div id="fname-classify" class="text-xs text-slate-500 mt-1 truncate"></div>
+
+          <div class="border-t border-slate-100 pt-4">
+            <label class="block text-sm font-semibold text-slate-700 mb-3">Or upload your own</label>
+            <div id="dropzone-classify" class="border-2 border-dashed border-slate-300 rounded-lg p-5 text-center cursor-pointer hover:border-forest hover:bg-forest-light transition-all">
+              <input id="file-classify" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
+              <div class="text-2xl mb-1">🛰️</div>
+              <div class="text-xs text-slate-500">Drop or click to browse</div>
+            </div>
+            <div id="preview-classify" class="mt-3 hidden">
+              <img id="img-classify" class="w-full h-36 object-contain rounded-lg border border-slate-200 bg-slate-50" />
+              <div id="fname-classify" class="text-xs text-slate-500 mt-1 truncate"></div>
+            </div>
           </div>
-          <button id="btn-classify" class="mt-4 w-full bg-forest text-white font-semibold py-2.5 rounded-lg hover:bg-forest-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            Run Classification
-          </button>
+
+          <!-- Progress bar -->
+          <div id="prog-classify" class="hidden mt-3">
+            <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Processing...</span><span id="prog-classify-pct">0%</span></div>
+            <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div id="prog-classify-fill" class="progress-bar h-full bg-forest rounded-full" style="width:0%"></div>
+            </div>
+          </div>
+
+          <button id="btn-classify" class="mt-4 w-full bg-forest text-white font-semibold py-2.5 rounded-lg hover:bg-forest-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Run Classification</button>
           <div id="msg-classify" class="text-xs text-slate-500 mt-2 min-h-4"></div>
         </div>
-        <!-- Result -->
+
         <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5">
           <div class="text-sm font-semibold text-slate-700 mb-4">Prediction Result</div>
           <div id="result-classify-empty" class="text-center py-10 text-slate-400">
@@ -153,23 +156,35 @@
           <span class="text-2xl">⚠️</span>
           <div>
             <div class="font-semibold text-amber-800">Unsupervised Anomaly Detection</div>
-            <div class="text-sm text-slate-600 mt-0.5">Detects deforestation, fire damage, or industrial intrusion in forest patches. A convolutional autoencoder trained on healthy forest imagery flags patches with high reconstruction error as anomalous. No labelled examples of damage needed — fully unsupervised.</div>
+            <div class="text-sm text-slate-600 mt-0.5">Detects deforestation, fire damage, or industrial intrusion in forest patches. A convolutional autoencoder trained on healthy forest imagery flags patches with high reconstruction error as anomalous — fully unsupervised, no labelled damage examples needed.</div>
           </div>
         </div>
         <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
-          <label class="block text-sm font-semibold text-slate-700 mb-3">Upload Forest Image</label>
-          <div id="dropzone-anomaly" class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer transition-all hover:border-amber-400 hover:bg-amber-50">
-            <input id="file-anomaly" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
-            <div class="text-3xl mb-2">🌲</div>
-            <div class="text-sm font-medium text-slate-600">Drop image here or click to browse</div>
-            <div class="text-xs text-slate-400 mt-1">GeoTIFF · PNG · JPEG</div>
+          <div class="mb-4">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Try a sample</div>
+            <div class="flex gap-2">
+              <button class="sample-anomaly text-xs px-2.5 py-1.5 bg-green-50 text-green-700 rounded-md hover:bg-green-100 border border-green-200" data-file="forest.jpg" data-label="Healthy forest">✅ Healthy forest</button>
+              <button class="sample-anomaly text-xs px-2.5 py-1.5 bg-red-50 text-red-700 rounded-md hover:bg-red-100 border border-red-200" data-file="anomaly_damaged.jpg" data-label="Damaged forest">🚨 Damaged forest</button>
+            </div>
           </div>
-          <div id="preview-anomaly" class="mt-3 hidden">
-            <img id="img-anomaly" class="w-full h-40 object-contain rounded-lg border border-slate-200 bg-slate-50" />
+          <div class="border-t border-slate-100 pt-4">
+            <label class="block text-sm font-semibold text-slate-700 mb-2">Or upload your own</label>
+            <div id="dropzone-anomaly" class="border-2 border-dashed border-slate-300 rounded-lg p-5 text-center cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-all">
+              <input id="file-anomaly" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
+              <div class="text-2xl mb-1">🌲</div>
+              <div class="text-xs text-slate-500">Drop or click to browse</div>
+            </div>
+            <div id="preview-anomaly" class="mt-3 hidden">
+              <img id="img-anomaly" class="w-full h-36 object-contain rounded-lg border border-slate-200 bg-slate-50" />
+            </div>
           </div>
-          <button id="btn-anomaly" class="mt-4 w-full bg-amber-500 text-white font-semibold py-2.5 rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50">
-            Detect Anomaly
-          </button>
+          <div id="prog-anomaly" class="hidden mt-3">
+            <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Processing...</span><span id="prog-anomaly-pct">0%</span></div>
+            <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div id="prog-anomaly-fill" class="progress-bar h-full bg-amber-500 rounded-full" style="width:0%"></div>
+            </div>
+          </div>
+          <button id="btn-anomaly" class="mt-4 w-full bg-amber-500 text-white font-semibold py-2.5 rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50">Detect Anomaly</button>
           <div id="msg-anomaly" class="text-xs text-slate-500 mt-2 min-h-4"></div>
         </div>
         <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5">
@@ -181,14 +196,8 @@
           <div id="result-anomaly" class="hidden">
             <div id="anomaly-badge" class="flex items-center gap-3 mb-4 p-3 rounded-lg">
               <div class="text-3xl" id="anomaly-icon">❓</div>
-              <div>
-                <div class="text-xs text-slate-500">Detection result</div>
-                <div class="text-xl font-bold" id="anomaly-label">—</div>
-              </div>
-              <div class="ml-auto text-right">
-                <div class="text-xs text-slate-500">Anomaly score</div>
-                <div class="text-2xl font-bold" id="anomaly-score">—</div>
-              </div>
+              <div><div class="text-xs text-slate-500">Detection result</div><div class="text-xl font-bold" id="anomaly-label">—</div></div>
+              <div class="ml-auto text-right"><div class="text-xs text-slate-500">Anomaly score</div><div class="text-2xl font-bold" id="anomaly-score">—</div></div>
             </div>
             <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Reconstruction error heatmap <span class="normal-case font-normal">(red = high error = anomalous)</span></div>
             <canvas id="heatmap-anomaly" class="heatmap-canvas w-full rounded-lg border border-slate-200" height="160"></canvas>
@@ -204,52 +213,52 @@
           <span class="text-2xl">🔄</span>
           <div>
             <div class="font-semibold text-purple-800">Temporal Change Detection</div>
-            <div class="text-sm text-slate-600 mt-0.5">Upload two images of the same area taken at different times. The model compares deep feature vectors extracted by a ResNet-50 encoder — robust to lighting and seasonal differences. Returns a change map showing exactly which areas changed.</div>
+            <div class="text-sm text-slate-600 mt-0.5">Upload two images of the same area at different times. ResNet-50 deep feature comparison — robust to lighting and seasonal differences. Returns a change map showing exactly which areas changed.</div>
           </div>
         </div>
         <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 space-y-4">
           <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">📅 Before Image <span class="font-normal text-slate-400">(earlier date)</span></label>
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Try a sample</div>
+            <button id="sample-change" class="text-xs px-2.5 py-1.5 bg-purple-50 text-purple-700 rounded-md hover:bg-purple-100 border border-purple-200">🌲→🏗️ Forest before/after deforestation</button>
+          </div>
+          <div class="border-t border-slate-100 pt-3">
+            <label class="block text-sm font-semibold text-slate-700 mb-2">📅 Before <span class="font-normal text-slate-400">(earlier)</span></label>
             <div id="dropzone-before" class="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-all">
               <input id="file-before" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
-              <div class="text-xl mb-1">📷</div>
-              <div class="text-xs text-slate-500">Click or drop</div>
+              <div class="text-sm text-slate-500">📷 Click or drop</div>
             </div>
             <img id="img-before" class="mt-2 hidden w-full h-24 object-contain rounded border border-slate-200 bg-slate-50" />
           </div>
           <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2">📅 After Image <span class="font-normal text-slate-400">(later date)</span></label>
+            <label class="block text-sm font-semibold text-slate-700 mb-2">📅 After <span class="font-normal text-slate-400">(later)</span></label>
             <div id="dropzone-after" class="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-all">
               <input id="file-after" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
-              <div class="text-xl mb-1">📷</div>
-              <div class="text-xs text-slate-500">Click or drop</div>
+              <div class="text-sm text-slate-500">📷 Click or drop</div>
             </div>
             <img id="img-after" class="mt-2 hidden w-full h-24 object-contain rounded border border-slate-200 bg-slate-50" />
           </div>
-          <button id="btn-change" class="w-full bg-purple-600 text-white font-semibold py-2.5 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50">
-            Detect Changes
-          </button>
+          <div id="prog-change" class="hidden">
+            <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Processing...</span><span id="prog-change-pct">0%</span></div>
+            <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div id="prog-change-fill" class="progress-bar h-full bg-purple-500 rounded-full" style="width:0%"></div>
+            </div>
+          </div>
+          <button id="btn-change" class="w-full bg-purple-600 text-white font-semibold py-2.5 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50">Detect Changes</button>
           <div id="msg-change" class="text-xs text-slate-500 min-h-4"></div>
         </div>
         <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5">
           <div class="text-sm font-semibold text-slate-700 mb-4">Change Detection Result</div>
           <div id="result-change-empty" class="text-center py-10 text-slate-400">
             <div class="text-4xl mb-2">🗺️</div>
-            <div class="text-sm">Upload before & after images to detect changes</div>
+            <div class="text-sm">Upload before &amp; after images to detect changes</div>
           </div>
           <div id="result-change" class="hidden">
             <div id="change-badge" class="flex items-center gap-3 mb-4 p-3 rounded-lg">
               <div class="text-3xl" id="change-icon">❓</div>
-              <div>
-                <div class="text-xs text-slate-500">Change detected</div>
-                <div class="text-xl font-bold" id="change-label">—</div>
-              </div>
-              <div class="ml-auto text-right">
-                <div class="text-xs text-slate-500">Change score</div>
-                <div class="text-2xl font-bold" id="change-score">—</div>
-              </div>
+              <div><div class="text-xs text-slate-500">Change detected</div><div class="text-xl font-bold" id="change-label">—</div></div>
+              <div class="ml-auto text-right"><div class="text-xs text-slate-500">Change score</div><div class="text-2xl font-bold" id="change-score">—</div></div>
             </div>
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Change map <span class="normal-case font-normal">(bright = changed area)</span></div>
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Change map <span class="normal-case font-normal">(bright = changed)</span></div>
             <canvas id="heatmap-change" class="heatmap-canvas w-full rounded-lg border border-slate-200" height="160"></canvas>
           </div>
         </div>
@@ -263,25 +272,34 @@
           <span class="text-2xl">🌲</span>
           <div>
             <div class="font-semibold text-green-800">Tree Crown Instance Segmentation</div>
-            <div class="text-sm text-slate-600 mt-0.5">Detects and segments individual tree crowns in aerial or satellite RGB imagery using Mask R-CNN (ResNet-50 + Feature Pyramid Network). Returns per-tree bounding boxes, confidence scores, and mask areas — designed for forestry inventory workflows.</div>
+            <div class="text-sm text-slate-600 mt-0.5">Detects and segments individual tree crowns in aerial imagery using Mask R-CNN (ResNet-50 + FPN). Returns per-tree bounding boxes, confidence scores, and mask areas — designed for forestry inventory workflows.</div>
           </div>
         </div>
         <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
-          <label class="block text-sm font-semibold text-slate-700 mb-3">Upload Aerial Image</label>
-          <div id="dropzone-segment" class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:border-green-500 hover:bg-green-50 transition-all">
-            <input id="file-segment" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
-            <div class="text-3xl mb-2">🛩️</div>
-            <div class="text-sm font-medium text-slate-600">Drop aerial image here</div>
-            <div class="text-xs text-slate-400 mt-1">GeoTIFF · PNG · JPEG</div>
+          <div class="mb-4">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Try a sample</div>
+            <button id="sample-segment" class="text-xs px-2.5 py-1.5 bg-green-50 text-green-700 rounded-md hover:bg-green-100 border border-green-200">🌲 Tree canopy aerial view</button>
           </div>
-          <div id="preview-segment" class="mt-3 hidden">
-            <img id="img-segment" class="w-full h-40 object-contain rounded-lg border border-slate-200 bg-slate-50" />
+          <div class="border-t border-slate-100 pt-4">
+            <label class="block text-sm font-semibold text-slate-700 mb-2">Or upload your own</label>
+            <div id="dropzone-segment" class="border-2 border-dashed border-slate-300 rounded-lg p-5 text-center cursor-pointer hover:border-green-500 hover:bg-green-50 transition-all">
+              <input id="file-segment" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg" class="hidden" />
+              <div class="text-2xl mb-1">🛩️</div>
+              <div class="text-xs text-slate-500">Drop or click to browse</div>
+            </div>
+            <div id="preview-segment" class="mt-3 hidden">
+              <img id="img-segment" class="w-full h-36 object-contain rounded-lg border border-slate-200 bg-slate-50" />
+            </div>
           </div>
           <label class="block text-xs text-slate-500 mt-3 mb-1">Confidence threshold: <span id="conf-val">0.50</span></label>
           <input id="conf-thresh" type="range" min="0.1" max="0.9" step="0.05" value="0.5" class="w-full accent-green-600" />
-          <button id="btn-segment" class="mt-4 w-full bg-green-600 text-white font-semibold py-2.5 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50">
-            Detect Tree Crowns
-          </button>
+          <div id="prog-segment" class="hidden mt-3">
+            <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Processing...</span><span id="prog-segment-pct">0%</span></div>
+            <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div id="prog-segment-fill" class="progress-bar h-full bg-green-500 rounded-full" style="width:0%"></div>
+            </div>
+          </div>
+          <button id="btn-segment" class="mt-4 w-full bg-green-600 text-white font-semibold py-2.5 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50">Detect Tree Crowns</button>
           <div id="msg-segment" class="text-xs text-slate-500 mt-2 min-h-4"></div>
         </div>
         <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5">
@@ -293,10 +311,7 @@
           <div id="result-segment" class="hidden">
             <div class="flex items-center gap-4 mb-4 p-3 bg-green-50 rounded-lg">
               <div class="text-3xl">🌲</div>
-              <div>
-                <div class="text-xs text-slate-500">Trees detected</div>
-                <div class="text-3xl font-bold text-green-700" id="tree-count">0</div>
-              </div>
+              <div><div class="text-xs text-slate-500">Trees detected</div><div class="text-3xl font-bold text-green-700" id="tree-count">0</div></div>
             </div>
             <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Individual detections</div>
             <div id="tree-detections" class="space-y-1.5 max-h-64 overflow-y-auto"></div>
@@ -312,7 +327,8 @@
           <span class="text-2xl">📡</span>
           <div>
             <div class="font-semibold text-orange-800">LiDAR Forest Inventory</div>
-            <div class="text-sm text-slate-600 mt-0.5">Upload a LiDAR point cloud (.LAS or .LAZ file) from an airborne survey. The algorithm builds a Canopy Height Model (CHM), then uses watershed segmentation to isolate individual trees and compute stand-level metrics: canopy height, cover fraction, stem density per hectare.</div>
+            <div class="text-sm text-slate-600 mt-0.5">Upload a LiDAR point cloud (.LAS/.LAZ). Builds a Canopy Height Model (CHM) and uses watershed segmentation to isolate individual trees. Returns canopy height, cover fraction, stem density per hectare, and per-tree metrics.
+            <a href="https://github.com/PDAL/data/raw/master/las/1.2-with-color.las" class="text-orange-600 underline ml-1" target="_blank">Download sample .LAS file →</a></div>
           </div>
         </div>
         <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
@@ -323,10 +339,14 @@
             <div class="text-sm font-medium text-slate-600">Drop LAS/LAZ file here</div>
             <div class="text-xs text-slate-400 mt-1">LAS · LAZ (airborne LiDAR format)</div>
           </div>
-          <div id="preview-lidar" class="mt-3 hidden text-xs text-slate-600 bg-slate-50 rounded-lg p-2.5 font-mono" id="fname-lidar"></div>
-          <button id="btn-lidar" class="mt-4 w-full bg-orange-500 text-white font-semibold py-2.5 rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50">
-            Analyse Point Cloud
-          </button>
+          <div id="preview-lidar" class="mt-3 hidden text-xs text-slate-600 bg-slate-50 rounded-lg p-2.5 font-mono"></div>
+          <div id="prog-lidar" class="hidden mt-3">
+            <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Processing point cloud...</span><span id="prog-lidar-pct">0%</span></div>
+            <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div id="prog-lidar-fill" class="progress-bar h-full bg-orange-500 rounded-full" style="width:0%"></div>
+            </div>
+          </div>
+          <button id="btn-lidar" class="mt-4 w-full bg-orange-500 text-white font-semibold py-2.5 rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50">Analyse Point Cloud</button>
           <div id="msg-lidar" class="text-xs text-slate-500 mt-2 min-h-4"></div>
         </div>
         <div class="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5">
@@ -337,7 +357,7 @@
           </div>
           <div id="result-lidar" class="hidden">
             <div class="grid grid-cols-2 gap-3 mb-4" id="lidar-stats"></div>
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Individual trees detected</div>
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Individual trees</div>
             <div id="lidar-trees" class="space-y-1.5 max-h-64 overflow-y-auto"></div>
           </div>
         </div>
@@ -346,7 +366,6 @@
 
   </div>
 
-  <!-- Footer -->
   <footer class="border-t border-slate-200 bg-white mt-8 py-4">
     <div class="max-w-6xl mx-auto px-4 flex flex-wrap gap-4 items-center justify-between text-xs text-slate-400">
       <span>Geospatial ML Platform · ResNet-50 on EuroSAT (Sentinel-2) · F1 = 0.99</span>
