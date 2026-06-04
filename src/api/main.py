@@ -152,15 +152,27 @@ def load_anomaly_detector() -> None:
 
 
 def load_segmentation() -> None:
+    """Load segmentation model on demand — called lazily to save RAM."""
     global segmentation_model
     from src.models.segmentation import load_segmentation_model
     path = _ensure_file(settings.segmentation_path, settings.s3_segmentation_key)
     segmentation_model = load_segmentation_model(path, device)
 
 
+def unload_segmentation() -> None:
+    """Free Mask R-CNN from memory after inference — it is large (~200 MB)."""
+    global segmentation_model
+    segmentation_model = None
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    for loader in (load_classifier, load_anomaly_detector, load_segmentation):
+    # Load only the two lightweight models at startup (~140 MB together).
+    # Mask R-CNN (~200 MB) is loaded lazily on first /segment request and
+    # unloaded afterwards to stay within Railway's 512 MB free-tier limit.
+    for loader in (load_classifier, load_anomaly_detector):
         try:
             loader()
         except FileNotFoundError:
@@ -194,11 +206,13 @@ def index() -> str:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    # Segmentation is lazy-loaded — report True if checkpoint file exists
+    seg_available = settings.segmentation_path.exists() or bool(settings.s3_segmentation_key)
     return HealthResponse(
         ok=True,
         classifier_loaded=classifier is not None,
         anomaly_detector_loaded=autoencoder is not None,
-        segmentation_loaded=segmentation_model is not None,
+        segmentation_loaded=seg_available,
         model_path=str(settings.model_path),
         autoencoder_path=str(settings.autoencoder_path),
         classes=class_names,
@@ -298,9 +312,17 @@ async def segment(
 
     Uses a Mask R-CNN (ResNet-50 + FPN) model. Returns per-tree bounding boxes,
     confidence scores, and mask areas. Designed for forestry inventory workflows.
+
+    The model is loaded lazily on first call and unloaded after inference to
+    conserve memory on constrained deployment environments.
     """
+    # Lazy-load segmentation model on first request
     if segmentation_model is None:
-        raise HTTPException(status_code=503, detail="Segmentation model not loaded.")
+        try:
+            load_segmentation()
+        except FileNotFoundError:
+            raise HTTPException(status_code=503, detail="Segmentation model not loaded.")
+
     content = await file.read()
     tmp_path = _save_upload(file, content)
     try:
@@ -316,6 +338,8 @@ async def segment(
         raise HTTPException(status_code=400, detail=f"Segmentation failed: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
+        # Unload Mask R-CNN immediately after inference to free ~200 MB RAM
+        unload_segmentation()
 
 
 @app.post("/pointcloud", response_model=PointCloudResponse)
