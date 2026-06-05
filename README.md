@@ -12,6 +12,24 @@ A production-ready Python platform for geospatial machine learning on **Sentinel
 
 ---
 
+## Research Foundation
+
+### Anomaly Detection — IEEE IJCNN 2024
+
+The unsupervised anomaly-detection module (`POST /anomaly`) is a direct application of published research:
+
+> **V. Srivastava**, "Autoencoder Optimization for Anomaly Detection," *IEEE International Joint Conference on Neural Networks (IJCNN)*, 2024.
+
+The implementation follows every methodological decision from the paper:
+- **Binary Cross-Entropy loss** over MSE for feature-rich coloured satellite images
+- **[0, 1] normalisation** (no ImageNet mean/std) to preserve radiometric content
+- **Three convolutional autoencoder architectures** (CAE-2Conv, CAE-3Conv, CAE-VariedFilter) trained in parallel; winner selected by **AUC-ROC** on a held-out normal/anomaly split
+- **Flip-only data augmentation** (horizontal + vertical) — rotation is avoided because orientation carries semantic meaning in satellite imagery
+- **Early stopping** with patience = 5 on validation BCE
+- **Anomaly threshold = 95th percentile** of normal-class reconstruction errors, computed automatically during training and stored in the checkpoint
+
+---
+
 ## Research Relevance
 
 This platform is built on **Sentinel-2 imagery** (via the EuroSAT benchmark), the same satellite data used in leading poverty estimation research:
@@ -122,10 +140,15 @@ python -m src.train \
 ### 3 — Train the anomaly detector
 
 ```bash
+# Trains all 3 CAE architectures (paper methodology), picks best by AUC-ROC
 python -m src.anomaly \
   --data-root data/eurosat \
   --normal-classes Forest \
-  --epochs 30 \
+  --epochs 50 \
+  --batch-size 256 \
+  --image-size 64 \
+  --patience 5 \
+  --threshold-percentile 95 \
   --wandb-mode disabled
 ```
 
