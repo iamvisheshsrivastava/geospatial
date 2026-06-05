@@ -48,7 +48,6 @@ FILES = {
     "segmentation_best.pt": config.get("segmentation", ""),
 }
 
-GITHUB_RELEASE = "https://github.com/iamvisheshsrivastava/geospatial/releases/download/v1.0.0"
 MIN_SIZE_BYTES = 1_000_000  # files must be at least 1 MB or something went wrong
 
 
@@ -112,18 +111,21 @@ def download_github(fname: str, dest: pathlib.Path) -> None:
 
 for fname, file_id in FILES.items():
     dest = pathlib.Path("checkpoints") / fname
-    if file_id:
-        print(f"[Google Drive] Downloading {fname} (id={file_id}) ...", flush=True)
-        success = download_gdrive(file_id, dest)
-        if not success:
-            print(f"  All Drive strategies failed — falling back to GitHub Release", flush=True)
-            download_github(fname, dest)
-    else:
-        print(f"[GitHub Release] Downloading {fname} ...", flush=True)
-        download_github(fname, dest)
 
-    if not dest.exists() or dest.stat().st_size < MIN_SIZE_BYTES:
-        print(f"ERROR: {fname} download failed or file too small", flush=True)
+    if not file_id:
+        print(f"FATAL: No Drive ID for {fname} in model_config.json", flush=True)
+        print(f"  → Run the Colab notebook (Step 8) to train and upload models first.", flush=True)
+        sys.exit(1)
+
+    print(f"[Google Drive] Downloading {fname} (id={file_id}) ...", flush=True)
+    success = download_gdrive(file_id, dest)
+
+    if not success or not dest.exists() or dest.stat().st_size < MIN_SIZE_BYTES:
+        print(f"", flush=True)
+        print(f"FATAL: Failed to download {fname} from Google Drive.", flush=True)
+        print(f"  Drive ID : {file_id}", flush=True)
+        print(f"  Fix      : Make sure the file is shared as 'Anyone with the link → Viewer'", flush=True)
+        print(f"  Re-run   : Colab Step 8 re-shares files and updates model_config.json", flush=True)
         sys.exit(1)
 
     mb = dest.stat().st_size / 1_048_576
