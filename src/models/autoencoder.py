@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import torch
 import torch.nn as nn
 
@@ -18,6 +19,42 @@ def _up_block(in_ch: int, out_ch: int) -> nn.Sequential:
         nn.BatchNorm2d(out_ch),
         nn.ReLU(inplace=True),
     )
+
+
+def _build_decoder(
+    bottleneck_ch: int,
+    image_size: int,
+    n_up_blocks: int,
+    channel_seq: list[int],
+) -> nn.Sequential:
+    """Build a decoder that produces (3, image_size, image_size) from (bottleneck_ch, 1, 1).
+
+    The initial ConvTranspose2d kernel is chosen so that after n_up_blocks×2 upsampling
+    the spatial size exactly matches image_size.
+
+    init_size = image_size // (2 ** n_up_blocks)
+    kernel    = init_size  (no padding, stride 1 → output = kernel)
+    """
+    init_size = image_size // (2 ** n_up_blocks)
+    if init_size < 1:
+        init_size = 1
+
+    layers: list[nn.Module] = [
+        nn.ConvTranspose2d(bottleneck_ch, channel_seq[0],
+                           kernel_size=init_size, stride=1, padding=0, bias=False),
+        nn.BatchNorm2d(channel_seq[0]),
+        nn.ReLU(inplace=True),
+    ]
+    for i in range(n_up_blocks):
+        out_ch = channel_seq[i + 1] if i + 1 < len(channel_seq) else 3
+        layers.append(_up_block(channel_seq[i], out_ch))
+
+    # Final 1×1 conv to exactly 3 channels if not already there
+    if channel_seq[-1] != 3:
+        layers.append(nn.Conv2d(channel_seq[-1], 3, kernel_size=1, bias=False))
+
+    layers.append(nn.Sigmoid())
+    return nn.Sequential(*layers)
 
 
 class _BaseAutoencoder(nn.Module):
@@ -45,77 +82,69 @@ class _BaseAutoencoder(nn.Module):
 
 
 class CAE2Conv(_BaseAutoencoder):
-    """2-conv-block encoder/decoder (shallowest variant from the paper)."""
+    """2-conv-block encoder — shallowest variant from the paper."""
 
-    def __init__(self) -> None:
+    def __init__(self, image_size: int = 224) -> None:
         super().__init__()
         self.encoder = nn.Sequential(
-            _conv_block(3, 64, stride=2),   # 112
-            _conv_block(64, 128, stride=2),  # 56
-            nn.AdaptiveAvgPool2d(1),         # 1×1
+            _conv_block(3, 64, stride=2),
+            _conv_block(64, 128, stride=2),
+            nn.AdaptiveAvgPool2d(1),
         )
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(128, 64, kernel_size=7, stride=1, padding=0),  # 7
-            nn.BatchNorm2d(64), nn.ReLU(inplace=True),
-            _up_block(64, 32),   # 14
-            _up_block(32, 16),   # 28
-            _up_block(16, 8),    # 56
-            _up_block(8, 4),     # 112
-            _up_block(4, 3),     # 224
-            nn.Sigmoid(),
+        # 2 stride-2 encoder blocks → need 5 up-blocks to reach 224, or 4 for 64, etc.
+        n_up = max(1, round(math.log2(image_size)) - 2)
+        self.decoder = _build_decoder(
+            bottleneck_ch=128,
+            image_size=image_size,
+            n_up_blocks=n_up,
+            channel_seq=[64, 32, 16, 8, 4, 3],
         )
 
 
 class CAE3Conv(_BaseAutoencoder):
-    """3-conv-block encoder/decoder (medium depth, paper default)."""
+    """3-conv-block encoder — medium depth, paper default."""
 
-    def __init__(self) -> None:
+    def __init__(self, image_size: int = 224) -> None:
         super().__init__()
         self.encoder = nn.Sequential(
-            _conv_block(3, 32, stride=2),    # 112
-            _conv_block(32, 64, stride=2),   # 56
-            _conv_block(64, 128, stride=2),  # 28
-            nn.AdaptiveAvgPool2d(1),         # 1×1
+            _conv_block(3, 32, stride=2),
+            _conv_block(32, 64, stride=2),
+            _conv_block(64, 128, stride=2),
+            nn.AdaptiveAvgPool2d(1),
         )
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(128, 128, kernel_size=7, stride=1, padding=0),  # 7
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True),
-            _up_block(128, 64),  # 14
-            _up_block(64, 32),   # 28
-            _up_block(32, 16),   # 56
-            _up_block(16, 8),    # 112
-            _up_block(8, 3),     # 224
-            nn.Sigmoid(),
+        n_up = max(1, round(math.log2(image_size)) - 2)
+        self.decoder = _build_decoder(
+            bottleneck_ch=128,
+            image_size=image_size,
+            n_up_blocks=n_up,
+            channel_seq=[128, 64, 32, 16, 8, 3],
         )
 
 
 class CAEVariedFilter(_BaseAutoencoder):
-    """Varied-filter encoder (large→small filter progression, paper variant 3)."""
+    """Varied-filter encoder — 5×5→3×3→1×1 kernel progression, paper variant 3."""
 
-    def __init__(self) -> None:
+    def __init__(self, image_size: int = 224) -> None:
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=5, stride=2, padding=2, bias=False),   # 112
+            nn.Conv2d(3, 32, kernel_size=5, stride=2, padding=2, bias=False),
             nn.BatchNorm2d(32), nn.ReLU(inplace=True),
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1, bias=False),  # 56
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(64), nn.ReLU(inplace=True),
-            nn.Conv2d(64, 128, kernel_size=1, stride=2, padding=0, bias=False), # 28
+            nn.Conv2d(64, 128, kernel_size=1, stride=2, padding=0, bias=False),
             nn.BatchNorm2d(128), nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d(1),  # 1×1
+            nn.AdaptiveAvgPool2d(1),
         )
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(128, 128, kernel_size=7, stride=1, padding=0),  # 7
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True),
-            _up_block(128, 64),  # 14
-            _up_block(64, 32),   # 28
-            _up_block(32, 16),   # 56
-            _up_block(16, 8),    # 112
-            _up_block(8, 3),     # 224
-            nn.Sigmoid(),
+        n_up = max(1, round(math.log2(image_size)) - 2)
+        self.decoder = _build_decoder(
+            bottleneck_ch=128,
+            image_size=image_size,
+            n_up_blocks=n_up,
+            channel_seq=[128, 64, 32, 16, 8, 3],
         )
 
 
-# Legacy alias kept so existing load_autoencoder calls don't break
+# Legacy alias
 SatelliteAutoencoder = CAE3Conv
 
 ARCHITECTURES: dict[str, type[_BaseAutoencoder]] = {
@@ -125,7 +154,7 @@ ARCHITECTURES: dict[str, type[_BaseAutoencoder]] = {
 }
 
 
-def build_autoencoder(arch: str = "CAE-3Conv", **_kwargs) -> _BaseAutoencoder:
+def build_autoencoder(arch: str = "CAE-3Conv", image_size: int = 224) -> _BaseAutoencoder:
     if arch not in ARCHITECTURES:
         raise ValueError(f"Unknown arch '{arch}'. Choose from {list(ARCHITECTURES)}")
-    return ARCHITECTURES[arch]()
+    return ARCHITECTURES[arch](image_size=image_size)

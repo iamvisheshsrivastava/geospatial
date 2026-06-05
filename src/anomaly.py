@@ -155,7 +155,7 @@ def _train_one(
     patience: int = 5,
 ) -> tuple[_BaseAutoencoder, float]:
     """Train a single architecture. Returns (model, best_val_loss)."""
-    model = build_autoencoder(arch_name).to(device)
+    model = build_autoencoder(arch_name, image_size=image_size).to(device)
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -343,7 +343,7 @@ def load_autoencoder(
     arch = ckpt.get("arch", "CAE-3Conv")
     image_size = ckpt.get("image_size", 64)
     threshold = ckpt.get("threshold", 0.05)  # sensible default if checkpoint is old
-    model = build_autoencoder(arch).to(device)
+    model = build_autoencoder(arch, image_size=image_size).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     return model, image_size, threshold
