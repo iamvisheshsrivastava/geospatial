@@ -92,6 +92,9 @@ jobs:
           print("\nAll checkpoints downloaded successfully.")
           EOF
 
+      - name: Install Heroku CLI
+        run: curl https://cli-assets.heroku.com/install.sh | sh
+
       - name: Log in to Heroku Container Registry
         run: echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
 
@@ -102,11 +105,8 @@ jobs:
         run: docker push registry.heroku.com/geospatial-ml/web
 
       - name: Release on Heroku
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          IMAGE_ID=$(docker inspect --format='{{index .RepoDigests 0}}' registry.heroku.com/geospatial-ml/web)
-          curl -s -X PATCH https://api.heroku.com/apps/geospatial-ml/formation \
-            -H "Accept: application/vnd.heroku+json; version=3" \
-            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"updates\":[{\"type\":\"web\",\"docker_image\":\"${IMAGE_ID}\"}]}"
+          heroku container:release web --app geospatial-ml
           echo "Deployed to https://geospatial-ml-374ed002e5df.herokuapp.com"
