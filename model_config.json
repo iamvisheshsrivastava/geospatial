@@ -1,0 +1,6 @@
+{
+  "best_model": "",
+  "autoencoder": "",
+  "segmentation": "",
+  "_note": "File IDs are auto-updated by train_on_colab.ipynb after each training run. Empty strings fall back to GitHub Releases."
+}

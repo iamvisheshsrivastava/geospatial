@@ -19,42 +19,46 @@ COPY scripts/ ./scripts/
 COPY deploy/ ./deploy/
 COPY entrypoint.sh .
 COPY README.md .
+COPY model_config.json .
 
 # Verify src/data module is present at build time
 RUN python -c "import src.data.preprocessing; print('src.data OK')"
 
 # ── Model checkpoint download ──────────────────────────────────────────────
-# Priority 1: Google Drive (set GDRIVE_*_ID build args in Railway dashboard
-#             after each Colab training run — no manual upload needed).
-# Priority 2: GitHub Releases v1.0.0 (fallback if Drive IDs are not set).
+# Reads model_config.json (auto-committed by train_on_colab.ipynb after each
+# training run) to get Google Drive file IDs.
 #
-# To use Google Drive:
-#   In Railway → your service → Settings → Build → Add build variable:
-#     GDRIVE_CLASSIFIER_ID   = <file-id from Google Drive share link>
-#     GDRIVE_AUTOENCODER_ID  = <file-id from Google Drive share link>
-#     GDRIVE_SEGMENTATION_ID = <file-id from Google Drive share link>
-#   Then trigger a redeploy — no git push required.
+# Flow:
+#   1. Colab trains models → saves to Google Drive → commits model_config.json
+#      → pushes to GitHub → Railway auto-deploys → downloads fresh models here
+#
+# Fallback: if a Drive ID is empty, falls back to GitHub Releases v1.0.0
 # ───────────────────────────────────────────────────────────────────────────
-ARG GDRIVE_CLASSIFIER_ID=""
-ARG GDRIVE_AUTOENCODER_ID=""
-ARG GDRIVE_SEGMENTATION_ID=""
-
 RUN python - <<'EOF'
-import os, pathlib, sys, requests
+import json, pathlib, requests
 
 pathlib.Path("checkpoints").mkdir(exist_ok=True)
 
-GDRIVE_IDS = {
-    "best_model.pt":         os.getenv("GDRIVE_CLASSIFIER_ID", ""),
-    "autoencoder_best.pt":   os.getenv("GDRIVE_AUTOENCODER_ID", ""),
-    "segmentation_best.pt":  os.getenv("GDRIVE_SEGMENTATION_ID", ""),
+# Read Drive file IDs committed by the Colab notebook
+with open("model_config.json") as f:
+    config = json.load(f)
+
+FILES = {
+    "best_model.pt":        config.get("best_model", ""),
+    "autoencoder_best.pt":  config.get("autoencoder", ""),
+    "segmentation_best.pt": config.get("segmentation", ""),
 }
+
 GITHUB_RELEASE = "https://github.com/iamvisheshsrivastava/geospatial/releases/download/v1.0.0"
+
 
 def download_gdrive(file_id: str, dest: pathlib.Path) -> None:
     import gdown
-    url = f"https://drive.google.com/uc?id={file_id}"
-    gdown.download(url, str(dest), quiet=False, fuzzy=True)
+    gdown.download(
+        f"https://drive.google.com/uc?id={file_id}",
+        str(dest), quiet=False, fuzzy=True
+    )
+
 
 def download_github(fname: str, dest: pathlib.Path) -> None:
     url = f"{GITHUB_RELEASE}/{fname}"
@@ -64,16 +68,17 @@ def download_github(fname: str, dest: pathlib.Path) -> None:
             for chunk in r.iter_content(chunk_size=65536):
                 f.write(chunk)
 
-for fname, gdrive_id in GDRIVE_IDS.items():
+
+for fname, file_id in FILES.items():
     dest = pathlib.Path("checkpoints") / fname
-    if gdrive_id:
-        print(f"[Google Drive] Downloading {fname} (id={gdrive_id}) ...", flush=True)
-        download_gdrive(gdrive_id, dest)
+    if file_id:
+        print(f"[Google Drive] Downloading {fname} ...", flush=True)
+        download_gdrive(file_id, dest)
     else:
-        print(f"[GitHub Release] Downloading {fname} ...", flush=True)
+        print(f"[GitHub Release] Downloading {fname} (no Drive ID set) ...", flush=True)
         download_github(fname, dest)
     mb = dest.stat().st_size / 1_048_576
-    print(f"  ✓ {fname}: {mb:.1f} MB", flush=True)
+    print(f"  OK  {fname}  {mb:.1f} MB", flush=True)
 
 print("All checkpoints ready.", flush=True)
 EOF
