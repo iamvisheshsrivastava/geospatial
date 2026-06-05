@@ -138,16 +138,17 @@ app = FastAPI(
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# Default thresholds — overridden at load time by the 95th-percentile value from the checkpoint
+_DEFAULT_ANOMALY_THRESHOLD = 0.05
+_DEFAULT_CHANGE_THRESHOLD = 0.15
+
 classifier: torch.nn.Module | None = None
 autoencoder: SatelliteAutoencoder | None = None
 segmentation_model: torch.nn.Module | None = None
 class_names: list[str] = []
 autoencoder_image_size: int = settings.image_size
+autoencoder_threshold: float = _DEFAULT_ANOMALY_THRESHOLD
 device = torch.device(settings.device)
-
-# Default thresholds — tuned after training; can be overridden via query params
-_DEFAULT_ANOMALY_THRESHOLD = 0.6
-_DEFAULT_CHANGE_THRESHOLD = 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +178,10 @@ def load_classifier() -> None:
 
 
 def load_anomaly_detector() -> None:
-    global autoencoder, autoencoder_image_size
+    global autoencoder, autoencoder_image_size, autoencoder_threshold
     from src.anomaly import load_autoencoder
     path = _ensure_file(settings.autoencoder_path, settings.s3_autoencoder_key)
-    autoencoder, autoencoder_image_size = load_autoencoder(path, device)
+    autoencoder, autoencoder_image_size, autoencoder_threshold = load_autoencoder(path, device)
 
 
 def load_segmentation() -> None:
@@ -292,7 +293,7 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
 @app.post("/anomaly", response_model=AnomalyResponse)
 async def anomaly_detect(
     file: UploadFile = File(...),
-    threshold: float = _DEFAULT_ANOMALY_THRESHOLD,
+    threshold: float | None = None,
 ) -> AnomalyResponse:
     """Detect whether a satellite patch is anomalous (e.g. deforested, damaged).
 
@@ -305,7 +306,8 @@ async def anomaly_detect(
     tmp_path = _save_upload(file, content)
     try:
         from src.anomaly import compute_anomaly_score
-        result = compute_anomaly_score(autoencoder, tmp_path, autoencoder_image_size, device, threshold)
+        effective_threshold = threshold if threshold is not None else autoencoder_threshold
+        result = compute_anomaly_score(autoencoder, tmp_path, autoencoder_image_size, device, effective_threshold)
         return AnomalyResponse(
             anomaly_score=result["anomaly_score"],
             is_anomaly=result["is_anomaly"],
