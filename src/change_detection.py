@@ -56,6 +56,12 @@ def _get_encoder(device: torch.device) -> ResNetEncoder:
     return _encoder
 
 
+def unload_encoder() -> None:
+    """Free the ResNet encoder from memory (called before loading Mask R-CNN)."""
+    global _encoder
+    _encoder = None
+
+
 # ---------------------------------------------------------------------------
 # Core change detection
 # ---------------------------------------------------------------------------
@@ -104,9 +110,18 @@ def detect_change(
         # Scalar score: spatial mean
         change_score = float(change_map.mean().item())
 
+        # Upsample from coarse feature-map resolution (7×7) to a finer grid (56×56)
+        # so the UI renders a meaningful spatial heatmap rather than large blocks.
+        change_map_up = F.interpolate(
+            change_map.unsqueeze(0).unsqueeze(0),
+            size=(56, 56),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze()
+
     result: dict = {
         "change_score": round(change_score, 6),
-        "change_map": change_map.cpu().numpy().tolist(),  # nested list
+        "change_map": change_map_up.cpu().numpy().tolist(),  # nested list 56×56
     }
     if threshold is not None:
         result["is_changed"] = change_score > threshold
