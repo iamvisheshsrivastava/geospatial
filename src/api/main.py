@@ -169,6 +169,10 @@ def unload_segmentation() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Limit PyTorch to 2 threads — Railway free tier has a shared CPU and
+    # spawning many threads causes contention that slows inference down.
+    torch.set_num_threads(2)
+
     # Load only the two lightweight models at startup (~140 MB together).
     # Mask R-CNN (~200 MB) is loaded lazily on first /segment request and
     # unloaded afterwards to stay within Railway's 512 MB free-tier limit.
@@ -177,6 +181,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             loader()
         except FileNotFoundError:
             pass  # server starts without models; /health reports status
+
+    # Warm up the classifier with a dummy forward pass so the first real
+    # request doesn't pay the JIT/kernel-load penalty.
+    if classifier is not None:
+        try:
+            dummy = torch.zeros(1, 3, 224, 224, device=device)
+            with torch.inference_mode():
+                classifier(dummy)
+        except Exception:
+            pass
+
     yield
 
 
@@ -227,7 +242,7 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
     tmp_path = _save_upload(file, content)
     try:
         tensor = preprocess_image(tmp_path, settings.image_size).unsqueeze(0).to(device)
-        with torch.no_grad():
+        with torch.inference_mode():
             logits = classifier(tensor)
             probs = torch.softmax(logits, dim=1).squeeze(0).cpu()
         confidence, predicted_index = torch.max(probs, dim=0)
@@ -325,7 +340,6 @@ async def segment(
         global classifier, autoencoder
         classifier = None
         autoencoder = None
-        # Also free the change-detection ResNet encoder if it was loaded.
         try:
             from src.change_detection import unload_encoder as _unload_cd
             _unload_cd()
@@ -335,12 +349,25 @@ async def segment(
         try:
             load_segmentation()
         except FileNotFoundError:
-            # Reload the lightweight models before surfacing the error.
             try: load_classifier()
             except Exception: pass
             try: load_anomaly_detector()
             except Exception: pass
             raise HTTPException(status_code=503, detail="Segmentation model not loaded.")
+        except (MemoryError, RuntimeError) as exc:
+            # OOM — restore lightweight models and return a clear explanation
+            try: load_classifier()
+            except Exception: pass
+            try: load_anomaly_detector()
+            except Exception: pass
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Segmentation requires ~400 MB RAM but this deployment is running on "
+                    "Railway's free tier (512 MB). Upgrade to a paid plan or run locally "
+                    "with docker compose up to use this feature."
+                )
+            ) from exc
 
     content = await file.read()
     tmp_path = _save_upload(file, content)
@@ -348,17 +375,21 @@ async def segment(
         from PIL import Image
         import torchvision.transforms.functional as TF
         pil = Image.open(tmp_path).convert("RGB")
-        img_tensor = TF.to_tensor(pil).to(device)  # CHW float [0,1] — MaskRCNN normalises internally
+        img_tensor = TF.to_tensor(pil).to(device)
 
         from src.models.segmentation import run_segmentation
-        result = run_segmentation(segmentation_model, img_tensor, confidence_threshold)
+        with torch.inference_mode():
+            result = run_segmentation(segmentation_model, img_tensor, confidence_threshold)
         return SegmentationResponse(**result)
+    except (MemoryError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Out of memory during inference. Upgrade to a plan with ≥1 GB RAM."
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Segmentation failed: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
-        # Unload Mask R-CNN immediately after inference to free ~200 MB RAM,
-        # then reload the lightweight models.
         unload_segmentation()
         gc.collect()
         try: load_classifier()

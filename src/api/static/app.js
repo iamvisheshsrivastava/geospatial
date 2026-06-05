@@ -38,47 +38,56 @@ refreshHealth();
 setInterval(refreshHealth, 30000);
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
-function startProgress(barId, labelId, estimatedMs = 4000) {
+function startProgress(barId, labelId, estimatedMs = 15000) {
   const bar   = document.getElementById(barId);
   const label = document.getElementById(labelId);
   if (!bar) return;
-  // wrapper is the grandparent div with id="prog-*"
   const wrapper = bar.closest('[id^="prog-"]');
   if (wrapper) wrapper.classList.remove('hidden');
-  let pct = 0;
-  bar.style.width = '0%';
-  label.textContent = '0%';
 
-  // Phase 1: jump to 35% quickly
+  let pct = 0, secs = 0;
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  label.textContent = '0%  0s';
+
+  // Elapsed-seconds ticker
+  const elapsedTimer = setInterval(() => {
+    secs++;
+    label.textContent = `${Math.round(pct)}%  ${secs}s`;
+  }, 1000);
+
+  // Phase 1: jump to 30% quickly (request sent, waiting for model)
   const phase1 = setInterval(() => {
-    pct = Math.min(pct + 5, 35);
+    pct = Math.min(pct + 3, 30);
     bar.style.width = pct + '%';
-    label.textContent = pct + '%';
-    if (pct >= 35) clearInterval(phase1);
+    label.textContent = `${Math.round(pct)}%  ${secs}s`;
+    if (pct >= 30) clearInterval(phase1);
   }, 60);
 
-  // Phase 2: slowly crawl to 90% over estimated time
-  const step = 55 / (estimatedMs / 120);
+  // Phase 2: crawl to 88% over estimatedMs (inference running)
+  const step = 58 / (estimatedMs / 200);
   const phase2 = setInterval(() => {
-    pct = Math.min(pct + step, 90);
+    pct = Math.min(pct + step, 88);
     bar.style.width = pct + '%';
-    label.textContent = Math.round(pct) + '%';
-    if (pct >= 90) clearInterval(phase2);
-  }, 120);
+    label.textContent = `${Math.round(pct)}%  ${secs}s`;
+    if (pct >= 88) clearInterval(phase2);
+  }, 200);
 
-  return phase2;
+  return { bar: phase2, elapsed: elapsedTimer };
 }
 
-function finishProgress(barId, labelId, timer) {
-  clearInterval(timer);
+function finishProgress(barId, labelId, timerObj) {
+  if (!timerObj) return;
+  clearInterval(timerObj.bar   || timerObj);   // handle old callers passing raw id
+  clearInterval(timerObj.elapsed);
   const bar   = document.getElementById(barId);
   const label = document.getElementById(labelId);
   if (!bar) return;
   bar.style.transition = 'width 0.3s ease';
   bar.style.width = '100%';
-  label.textContent = '100%';
+  label.textContent = '100% ✓';
   const wrapper = bar.closest('[id^="prog-"]');
-  setTimeout(() => { if (wrapper) wrapper.classList.add('hidden'); bar.style.width = '0%'; }, 800);
+  setTimeout(() => { if (wrapper) wrapper.classList.add('hidden'); bar.style.width = '0%'; }, 1000);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -183,7 +192,7 @@ document.getElementById('btn-classify').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = 'Classifying...';
 
   // IMPROVEMENT 2: start progress bar
-  const timer = startProgress('prog-classify-fill', 'prog-classify-pct', 4000);
+  const timer = startProgress('prog-classify-fill', 'prog-classify-pct', 15000);
   document.getElementById('msg-classify').textContent = 'Sending to model...';
 
   try {
@@ -245,7 +254,7 @@ document.getElementById('btn-anomaly').addEventListener('click', async () => {
   clearResult('result-anomaly', 'result-anomaly-empty');
   const btn = document.getElementById('btn-anomaly');
   btn.disabled = true; btn.textContent = 'Analysing...';
-  const timer = startProgress('prog-anomaly-fill', 'prog-anomaly-pct', 5000);
+  const timer = startProgress('prog-anomaly-fill', 'prog-anomaly-pct', 12000);
   try {
     const fd = new FormData(); fd.append('file', fileAnomaly);
     const r  = await fetch('/anomaly', { method: 'POST', body: fd });
@@ -307,7 +316,7 @@ document.getElementById('btn-change').addEventListener('click', async () => {
   clearResult('result-change', 'result-change-empty');
   const btn = document.getElementById('btn-change');
   btn.disabled = true; btn.textContent = 'Analysing...';
-  const timer = startProgress('prog-change-fill', 'prog-change-pct', 6000);
+  const timer = startProgress('prog-change-fill', 'prog-change-pct', 15000);
   try {
     const fd = new FormData(); fd.append('before', fileBefore); fd.append('after', fileAfter);
     const r  = await fetch('/change-detect', { method: 'POST', body: fd });
@@ -363,7 +372,7 @@ document.getElementById('btn-segment').addEventListener('click', async () => {
   clearResult('result-segment', 'result-segment-empty');
   const btn = document.getElementById('btn-segment');
   btn.disabled = true; btn.textContent = 'Detecting...';
-  const timer = startProgress('prog-segment-fill', 'prog-segment-pct', 5000);
+  const timer = startProgress('prog-segment-fill', 'prog-segment-pct', 45000);
   try {
     const fd = new FormData(); fd.append('file', fileSegment);
     const thresh = parseFloat(confSlider.value);
@@ -408,12 +417,31 @@ setupDropzone('dropzone-lidar', 'file-lidar', f => {
   prev.classList.remove('hidden');
 });
 
+// Sample button — load the built-in synthetic forest LAS file
+document.getElementById('sample-lidar').addEventListener('click', async () => {
+  const btn = document.getElementById('sample-lidar');
+  btn.textContent = 'Loading...'; btn.disabled = true;
+  try {
+    const resp = await fetch('/static/samples/sample.las');
+    const blob = await resp.blob();
+    fileLidar = new File([blob], 'sample.las', { type: 'application/octet-stream' });
+    const prev = document.getElementById('preview-lidar');
+    prev.textContent = `📁 sample.las  (${(fileLidar.size/1024/1024).toFixed(1)} MB)`;
+    prev.classList.remove('hidden');
+    document.getElementById('msg-lidar').textContent = 'Sample loaded: synthetic forest LiDAR scan (50k points)';
+  } catch(e) {
+    document.getElementById('msg-lidar').textContent = `Failed to load sample: ${e.message}`;
+  } finally {
+    btn.textContent = '📡 Forest LiDAR scan'; btn.disabled = false;
+  }
+});
+
 document.getElementById('btn-lidar').addEventListener('click', async () => {
   if (!fileLidar) { document.getElementById('msg-lidar').textContent = 'Choose a LAS/LAZ file first.'; return; }
   clearResult('result-lidar', 'result-lidar-empty');
   const btn = document.getElementById('btn-lidar');
   btn.disabled = true; btn.textContent = 'Processing...';
-  const timer = startProgress('prog-lidar-fill', 'prog-lidar-pct', 20000);
+  const timer = startProgress('prog-lidar-fill', 'prog-lidar-pct', 30000);
   document.getElementById('msg-lidar').textContent = 'Analysing point cloud (this may take 30s)...';
   try {
     const fd = new FormData(); fd.append('file', fileLidar);
