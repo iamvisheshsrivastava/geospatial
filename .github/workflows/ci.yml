@@ -33,63 +33,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download model checkpoints from Google Drive in the Actions runner.
-      # This is more reliable than downloading inside Docker because:
-      #   - Actions runners have uncapped network access
-      #   - gdown works better outside Docker build isolation
-      #   - Failures surface immediately with clear logs
-      - name: Download model checkpoints from Google Drive
+      # Download model checkpoints directly from Kaggle notebook output.
+      # No Google Drive needed — Kaggle API token stored in GitHub Secrets.
+      - name: Download model checkpoints from Kaggle
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          pip install gdown requests
+          pip install -q kaggle
+          mkdir -p checkpoints
+
+          echo "Downloading notebook output from Kaggle..."
+          kaggle kernels output visheshsrivastava/notebookb99e7c18d9 -p /tmp/kaggle_output
+
+          echo "Locating checkpoint files..."
           python - << 'EOF'
-          import json, pathlib, sys, time
-          import gdown
+          import pathlib, shutil, sys
 
-          with open("model_config.json") as f:
-              config = json.load(f)
+          src_root = pathlib.Path("/tmp/kaggle_output")
+          dst_root = pathlib.Path("checkpoints")
+          dst_root.mkdir(exist_ok=True)
 
-          FILES = {
-              "best_model.pt":        config.get("best_model", ""),
-              "autoencoder_best.pt":  config.get("autoencoder", ""),
-              "segmentation_best.pt": config.get("segmentation", ""),
-          }
-
+          FILES = ["best_model.pt", "autoencoder_best.pt", "segmentation_best.pt"]
           MIN_BYTES = 1_000_000
-          pathlib.Path("checkpoints").mkdir(exist_ok=True)
 
-          for fname, file_id in FILES.items():
-              dest = pathlib.Path("checkpoints") / fname
-
-              if not file_id:
-                  print(f"FATAL: No Drive ID for {fname} in model_config.json")
-                  print("  → Re-run the Colab notebook (Step 8) to upload models.")
+          for fname in FILES:
+              matches = list(src_root.rglob(fname))
+              if not matches:
+                  print(f"FATAL: {fname} not found in Kaggle output.")
+                  print("  Make sure the notebook ran successfully and saved checkpoints.")
                   sys.exit(1)
-
-              print(f"\nDownloading {fname} (Drive ID: {file_id}) ...")
-              success = False
-
-              for attempt in range(1, 4):
-                  try:
-                      out = gdown.download(id=file_id, output=str(dest), quiet=False)
-                      if out and dest.exists() and dest.stat().st_size >= MIN_BYTES:
-                          success = True
-                          break
-                      print(f"  Attempt {attempt}: file too small or None, retrying...")
-                      time.sleep(3)
-                  except Exception as e:
-                      print(f"  Attempt {attempt} failed: {e}")
-                      time.sleep(3)
-
-              if not success:
-                  print(f"\nFATAL: Could not download {fname} after 3 attempts.")
-                  print("  Check: file is shared as 'Anyone with the link → Viewer' in Drive.")
-                  print("  Fix  : Re-run Colab Step 8 to re-share files and update model_config.json.")
+              src = matches[0]
+              dst = dst_root / fname
+              shutil.copy2(src, dst)
+              mb = dst.stat().st_size / 1_048_576
+              if dst.stat().st_size < MIN_BYTES:
+                  print(f"FATAL: {fname} is too small ({mb:.1f} MB) — training may have failed.")
                   sys.exit(1)
+              print(f"  OK  {fname}  ({mb:.1f} MB)")
 
-              mb = dest.stat().st_size / 1_048_576
-              print(f"  ✓ {fname}  {mb:.1f} MB")
-
-          print("\nAll checkpoints downloaded successfully.")
+          print("All checkpoints ready.")
           EOF
 
       - name: Install Heroku CLI
