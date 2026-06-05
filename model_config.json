@@ -1,6 +1,5 @@
 {
-  "best_model": "16u1gdV8cU-DC_Ro5-64wN5L_DovUOZIC",
-  "autoencoder": "18Xi5G9P2_NuIe0TM7bTkEUSBB8HHl9d4",
-  "segmentation": "1x2xrrFRTJtBNjkAABm03XDZkyCDWGHS6",
-  "_note": "Auto-updated by train_on_colab.ipynb \u2014 do not edit manually."
+  "_trained_at": "20260605_221708",
+  "_dataset": "visheshsrivastava/geospatial-checkpoints",
+  "_note": "Auto-updated by Kaggle notebook \u2014 do not edit manually."
 }
