@@ -212,8 +212,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     for loader in (load_classifier, load_anomaly_detector):
         try:
             loader()
-        except FileNotFoundError:
-            pass  # server starts without models; /health reports status
+        except Exception as e:
+            # Missing file or incompatible checkpoint — start anyway, endpoint
+            # returns 503 until a compatible checkpoint is deployed.
+            print(f"WARNING: {loader.__name__} failed — {e}")
 
     # Warm up the classifier with a dummy forward pass so the first real
     # request doesn't pay the JIT/kernel-load penalty.
