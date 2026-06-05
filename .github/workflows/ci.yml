@@ -49,30 +49,26 @@ jobs:
 
           echo "Verifying checkpoint files..."
           python - << 'EOF'
-import pathlib, sys
-
-dst_root = pathlib.Path("checkpoints")
-FILES = ["best_model.pt", "autoencoder_best.pt", "segmentation_best.pt"]
-MIN_BYTES = 1_000_000
-
-for fname in FILES:
-    matches = list(dst_root.rglob(fname))
-    if not matches:
-        print(f"FATAL: {fname} not found in downloaded dataset.")
-        sys.exit(1)
-    f = matches[0]
-    mb = f.stat().st_size / 1_048_576
-    if f.stat().st_size < MIN_BYTES:
-        print(f"FATAL: {fname} too small ({mb:.1f} MB) — training may have failed.")
-        sys.exit(1)
-    # Move to checkpoints/ root if in subfolder
-    dest = dst_root / fname
-    if f != dest:
-        f.rename(dest)
-    print(f"  OK  {fname}  ({mb:.1f} MB)")
-
-print("All checkpoints ready.")
-EOF
+          import pathlib, sys
+          dst_root = pathlib.Path("checkpoints")
+          FILES = ["best_model.pt", "autoencoder_best.pt", "segmentation_best.pt"]
+          MIN_BYTES = 1_000_000
+          for fname in FILES:
+              matches = list(dst_root.rglob(fname))
+              if not matches:
+                  print(f"FATAL: {fname} not found in downloaded dataset.")
+                  sys.exit(1)
+              f = matches[0]
+              mb = f.stat().st_size / 1_048_576
+              if f.stat().st_size < MIN_BYTES:
+                  print(f"FATAL: {fname} too small ({mb:.1f} MB) — training may have failed.")
+                  sys.exit(1)
+              dest = dst_root / fname
+              if f != dest:
+                  f.rename(dest)
+              print(f"  OK  {fname}  ({mb:.1f} MB)")
+          print("All checkpoints ready.")
+          EOF
 
       - name: Install Heroku CLI
         run: curl https://cli-assets.heroku.com/install.sh | sh
