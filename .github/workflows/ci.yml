@@ -33,46 +33,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download model checkpoints directly from Kaggle notebook output.
-      # No Google Drive needed — Kaggle API token stored in GitHub Secrets.
-      - name: Download model checkpoints from Kaggle
+      # Download model checkpoints from Kaggle Dataset.
+      # Dataset: visheshsrivastava/geospatial-checkpoints
+      # Updated automatically by the Kaggle training notebook (Step 8).
+      - name: Download model checkpoints from Kaggle Dataset
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           pip install -q kaggle
           mkdir -p checkpoints
 
-          echo "Downloading notebook output from Kaggle..."
-          kaggle kernels output visheshsrivastava/notebookb99e7c18d9 -p /tmp/kaggle_output
+          echo "Downloading geospatial-checkpoints dataset from Kaggle..."
+          kaggle datasets download visheshsrivastava/geospatial-checkpoints \
+            --path checkpoints/ --unzip
 
-          echo "Locating checkpoint files..."
+          echo "Verifying checkpoint files..."
           python - << 'EOF'
-          import pathlib, shutil, sys
+import pathlib, sys
 
-          src_root = pathlib.Path("/tmp/kaggle_output")
-          dst_root = pathlib.Path("checkpoints")
-          dst_root.mkdir(exist_ok=True)
+dst_root = pathlib.Path("checkpoints")
+FILES = ["best_model.pt", "autoencoder_best.pt", "segmentation_best.pt"]
+MIN_BYTES = 1_000_000
 
-          FILES = ["best_model.pt", "autoencoder_best.pt", "segmentation_best.pt"]
-          MIN_BYTES = 1_000_000
+for fname in FILES:
+    matches = list(dst_root.rglob(fname))
+    if not matches:
+        print(f"FATAL: {fname} not found in downloaded dataset.")
+        sys.exit(1)
+    f = matches[0]
+    mb = f.stat().st_size / 1_048_576
+    if f.stat().st_size < MIN_BYTES:
+        print(f"FATAL: {fname} too small ({mb:.1f} MB) — training may have failed.")
+        sys.exit(1)
+    # Move to checkpoints/ root if in subfolder
+    dest = dst_root / fname
+    if f != dest:
+        f.rename(dest)
+    print(f"  OK  {fname}  ({mb:.1f} MB)")
 
-          for fname in FILES:
-              matches = list(src_root.rglob(fname))
-              if not matches:
-                  print(f"FATAL: {fname} not found in Kaggle output.")
-                  print("  Make sure the notebook ran successfully and saved checkpoints.")
-                  sys.exit(1)
-              src = matches[0]
-              dst = dst_root / fname
-              shutil.copy2(src, dst)
-              mb = dst.stat().st_size / 1_048_576
-              if dst.stat().st_size < MIN_BYTES:
-                  print(f"FATAL: {fname} is too small ({mb:.1f} MB) — training may have failed.")
-                  sys.exit(1)
-              print(f"  OK  {fname}  ({mb:.1f} MB)")
-
-          print("All checkpoints ready.")
-          EOF
+print("All checkpoints ready.")
+EOF
 
       - name: Install Heroku CLI
         run: curl https://cli-assets.heroku.com/install.sh | sh
