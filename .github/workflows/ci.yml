@@ -1,15 +1,15 @@
-name: CI
+name: CI / Deploy
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -23,3 +23,27 @@ jobs:
 
       - name: Run tests
         run: PYTHONPATH=. pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Heroku Container Registry
+        run: echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
+
+      - name: Build Docker image
+        run: docker build -t registry.heroku.com/geospatial-ml/web .
+
+      - name: Push to Heroku Container Registry
+        run: docker push registry.heroku.com/geospatial-ml/web
+
+      - name: Release on Heroku
+        run: |
+          curl -s -X PATCH https://api.heroku.com/apps/geospatial-ml/formation \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"updates":[{"type":"web","docker_image":"'"$(docker inspect --format='{{index .RepoDigests 0}}' registry.heroku.com/geospatial-ml/web)"'"}]}'

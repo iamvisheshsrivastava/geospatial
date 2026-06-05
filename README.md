@@ -3,10 +3,10 @@
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-ee4c2c?logo=pytorch)
 ![Docker](https://img.shields.io/badge/Docker-containerised-2496ed?logo=docker)
-![Railway](https://img.shields.io/badge/Deployed-Railway-6441a5)
+![Heroku](https://img.shields.io/badge/Deployed-Heroku-430098?logo=heroku)
 ![CI](https://github.com/iamvisheshsrivastava/geospatial/actions/workflows/ci.yml/badge.svg)
 
-> **Live demo:** [api-production-3378.up.railway.app](https://api-production-3378.up.railway.app) · [Interactive API docs](https://api-production-3378.up.railway.app/docs)
+> **Live demo:** [geospatial-ml-374ed002e5df.herokuapp.com](https://geospatial-ml-374ed002e5df.herokuapp.com) · [Interactive API docs](https://geospatial-ml-374ed002e5df.herokuapp.com/docs)
 
 A production-ready Python platform for geospatial machine learning on **Sentinel-2 satellite imagery and LiDAR point clouds** — covering the full workflow from raw data through model training, explainability analysis, and cloud deployment.
 
@@ -66,7 +66,7 @@ satellite image / LiDAR point cloud
   FastAPI (Docker)          ← inference API + browser UI
         │
         ▼
-  Railway (cloud)           ← containerised deployment, live public URL
+  Heroku (cloud)            ← containerised deployment, live public URL
         │
   Weights & Biases          ← experiment tracking, metrics, confusion matrix
 ```
@@ -188,16 +188,16 @@ docker compose up --build
 
 ---
 
-## Deployment (Railway)
+## Deployment (Heroku)
 
-The live API is deployed on [Railway](https://railway.app) using Docker. Model checkpoints are
-downloaded automatically from [GitHub Releases v1.0.0](https://github.com/iamvisheshsrivastava/geospatial/releases/tag/v1.0.0)
-at container startup — no S3 or external storage required.
+The live API is deployed on [Heroku](https://heroku.com) using Docker (Standard-2X dyno, 1 GB RAM).
+Model checkpoints are downloaded automatically from Google Drive at container build time via
+`model_config.json` — updated automatically after each Colab training run, no manual upload needed.
 
 ```bash
-# railway.toml already configured — just push to main
+# CI/CD is fully automated via GitHub Actions
+# Just push to main — tests run, then Docker image builds and deploys to Heroku
 git push origin main
-# Railway auto-deploys on every push
 ```
 
 ---
