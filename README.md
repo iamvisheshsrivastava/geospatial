@@ -84,6 +84,7 @@ This distinction determines whether model predictions can inform **targeted inte
 | Notebook | Description |
 |---|---|
 | [`train_on_colab.ipynb`](train_on_colab.ipynb) | End-to-end training on Google Colab free GPU — downloads EuroSAT, trains all models, saves to Drive |
+| [`notebooks/03_lidar_open3d_forest.ipynb`](notebooks/03_lidar_open3d_forest.ipynb) | **LiDAR forest inventory with Open3D** — load LAS/LAZ, height normalisation, CHM rasterisation, individual tree segmentation (ITS), per-tree metrics; interactive 3D visualisation via Open3D; production AWS/Airflow pipeline sketch for 44moles-style forestry applications |
 | [`notebooks/04_gradcam_xai.ipynb`](notebooks/04_gradcam_xai.ipynb) | GradCAM + SHAP explainability on ResNet-50 — spatial heatmaps showing which pixels drive land-cover predictions; poverty-estimation interpretation |
 | [`notebooks/05_poverty_proxy_nightlights.ipynb`](notebooks/05_poverty_proxy_nightlights.ipynb) | VIIRS nighttime lights as poverty proxy — wealth index combining NTL intensity + urban LC fraction; connection to Jean et al. 2016 pipeline |
 | [`notebooks/06_multispectral_features.ipynb`](notebooks/06_multispectral_features.ipynb) | 13-band Sentinel-2 feature extraction — NDVI, NDBI, NDWI computation; spectral profile visualisation; logistic regression AUC vs RGB baseline |
