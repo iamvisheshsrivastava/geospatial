@@ -30,16 +30,40 @@ The implementation follows every methodological decision from the paper:
 
 ---
 
-## Research Relevance
+## Connection to Poverty Estimation and SDG Research
 
-This platform is built on **Sentinel-2 imagery** (via the EuroSAT benchmark), the same satellite data used in leading poverty estimation research:
+This platform directly implements the three pillars of satellite-based poverty estimation research, aligned with the methodology of the [AI and Global Development Lab](https://www.aidevlab.org) at Chalmers University:
 
-- **Jean et al. (2016, *Science*)** demonstrated that CNNs trained on daytime satellite imagery can predict consumption poverty across African villages with r² ≈ 0.64 — outperforming traditional survey extrapolation.
-- **Yeh et al. (2020, *Nature Communications*)** extended this to Sentinel-2, achieving state-of-the-art poverty maps at 2.4 km resolution across Africa.
+### Pillar 1 — Deep learning on Sentinel-2 for poverty estimation (SDG-1)
 
-Beyond classification, this repo includes **XAI (GradCAM + SHAP)** notebooks that reveal *which visual features* drive model decisions — a critical requirement for deploying satellite-based socioeconomic models in policy contexts. Identifying whether a poverty model attends to roof materials, road density, or vegetation patterns directly informs its trustworthiness and fairness.
+The EuroSAT dataset used throughout this repo is derived from **Sentinel-2 satellite imagery** — the same sensor used in leading poverty-estimation pipelines. Notebook 07 implements the full **Jean et al. (2016, *Science*)** two-stage transfer learning pipeline:
 
-**Earth observation for socioeconomic analysis** is one of the most impactful applications of geospatial ML, directly advancing UN Sustainable Development Goals SDG-1 (No Poverty) and SDG-11 (Sustainable Cities).
+1. Train a CNN on daytime Sentinel-2 imagery to predict **VIIRS nighttime light intensity** (free global proxy for ground-truth wealth)
+2. Extract CNN penultimate-layer features → **Ridge regression** → DHS survey wealth index
+
+This produces poverty maps at continental scale, including locations with **no ground-truth survey data** — the core technical contribution of the Jean et al. and Yeh et al. (2020, *Nature Communications*) pipelines.
+
+### Pillar 2 — Multi-sensor comparison readiness
+
+The preprocessing pipeline (`src/data/preprocessing.py`) uses `rasterio` for resolution-agnostic raster loading, making it straightforward to swap imagery sources:
+
+| Sensor | Resolution | Access |
+|---|---|---|
+| Pléiades | 2 m | Commercial |
+| **Sentinel-2** | **10 m** | **Free — used here** |
+| Landsat | 30 m | Free |
+
+Comparing poverty-estimate quality and computational cost across these sensors — quantifying the precision/cost trade-off — is a direct extension of this codebase.
+
+### Pillar 3 — XAI for policy-relevant model interpretation (SDG-16)
+
+The `/explain` API endpoint and [Notebook 04](notebooks/04_gradcam_xai.ipynb) implement **GradCAM** saliency maps on the ResNet-50 classifier. Applied to a poverty-estimation CNN, these maps answer the policy-critical question:
+
+> *Does the model attend to controllable features (roof materials, road access) or structural geography (distance to cities)?*
+
+This distinction determines whether model predictions can inform **targeted interventions** — a requirement for responsible deployment in SDG policy contexts.
+
+**Relevant references:** Jean et al. (2016, *Science*) · Yeh et al. (2020, *Nature Comms*) · Henderson et al. (2012, *AER*) · Engstrom et al. (2017, *World Bank*)
 
 ---
 
@@ -63,6 +87,7 @@ Beyond classification, this repo includes **XAI (GradCAM + SHAP)** notebooks tha
 | [`notebooks/04_gradcam_xai.ipynb`](notebooks/04_gradcam_xai.ipynb) | GradCAM + SHAP explainability on ResNet-50 — spatial heatmaps showing which pixels drive land-cover predictions; poverty-estimation interpretation |
 | [`notebooks/05_poverty_proxy_nightlights.ipynb`](notebooks/05_poverty_proxy_nightlights.ipynb) | VIIRS nighttime lights as poverty proxy — wealth index combining NTL intensity + urban LC fraction; connection to Jean et al. 2016 pipeline |
 | [`notebooks/06_multispectral_features.ipynb`](notebooks/06_multispectral_features.ipynb) | 13-band Sentinel-2 feature extraction — NDVI, NDBI, NDWI computation; spectral profile visualisation; logistic regression AUC vs RGB baseline |
+| [`notebooks/07_africa_poverty_transfer_learning.ipynb`](notebooks/07_africa_poverty_transfer_learning.ipynb) | **Jean et al. (2016) pipeline implemented** — two-stage transfer learning: CNN→NTL prediction, Ridge regression→DHS wealth index, dense poverty map over Nigeria; connects to PhD Objectives 1–3 |
 
 ---
 
