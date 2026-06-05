@@ -78,6 +78,38 @@ class PointCloudResponse(BaseModel):
     num_trees_detected: int
 
 
+class ExplainResponse(BaseModel):
+    predicted_class: str
+    confidence: float
+    gradcam_b64: str          # base64 PNG — GradCAM overlay on original image
+
+
+class SpectralResponse(BaseModel):
+    vegetation_b64: str       # base64 PNG — VARI heatmap (RdYlGn)
+    water_b64: str            # base64 PNG — ExWI heatmap (Blues)
+    urban_b64: str            # base64 PNG — ExUI heatmap (Oranges)
+    vegetation_mean: float
+    water_mean: float
+    urban_mean: float
+    interpretation: str
+
+
+class PovertyContributor(BaseModel):
+    class_name: str
+    probability: float
+    contribution: float
+    weight: float
+
+
+class PovertyResponse(BaseModel):
+    wealth_index: float       # [0, 1]
+    wealth_label: str         # Very Low … Very High
+    wealth_color: str         # hex colour for UI badge
+    interpretation: str
+    top_contributors: list[dict]
+    methodology: str
+
+
 class HealthResponse(BaseModel):
     ok: bool
     classifier_loaded: bool
@@ -423,5 +455,107 @@ async def pointcloud_analyse(file: UploadFile = File(...)) -> PointCloudResponse
         raise HTTPException(status_code=501, detail=f"LiDAR processing unavailable: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Point cloud processing failed: {exc}") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# XAI — GradCAM explanation
+# ---------------------------------------------------------------------------
+
+@app.post("/explain", response_model=ExplainResponse)
+async def explain(file: UploadFile = File(...)) -> ExplainResponse:
+    """Run GradCAM on the ResNet-50 classifier and return a saliency overlay.
+
+    Highlights which image regions most influenced the predicted land-cover class.
+    Implements the XAI pipeline from notebooks/04_gradcam_xai.ipynb.
+    """
+    if classifier is None:
+        raise HTTPException(status_code=503, detail="Classifier not loaded.")
+
+    content = await file.read()
+    tmp_path = _save_upload(file, content)
+    try:
+        # First run classification to get predicted class
+        tensor = preprocess_image(tmp_path, settings.image_size).unsqueeze(0).to(device)
+        with torch.inference_mode():
+            logits = classifier(tensor)
+            probs  = torch.softmax(logits, dim=1).squeeze(0).cpu()
+        confidence, predicted_index = torch.max(probs, dim=0)
+        predicted_class = class_names[int(predicted_index)]
+
+        # Run GradCAM (requires gradients — handled inside gradcam_explain)
+        from src.xai import gradcam_explain
+        gradcam_b64 = gradcam_explain(
+            model=classifier,
+            image_path=tmp_path,
+            image_size=settings.image_size,
+            device=device,
+            target_class_idx=int(predicted_index),
+        )
+        return ExplainResponse(
+            predicted_class=predicted_class,
+            confidence=round(float(confidence), 4),
+            gradcam_b64=gradcam_b64,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"GradCAM failed: {exc}") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Spectral analysis — RGB-based vegetation / water / urban indices
+# ---------------------------------------------------------------------------
+
+@app.post("/spectral", response_model=SpectralResponse)
+async def spectral_analysis(file: UploadFile = File(...)) -> SpectralResponse:
+    """Compute VARI, ExWI and ExUI spectral indices from an RGB satellite image.
+
+    Returns three colour-coded heatmaps (vegetation, water, urban) and scalar
+    mean values — inspired by notebooks/06_multispectral_features.ipynb.
+    """
+    content = await file.read()
+    tmp_path = _save_upload(file, content)
+    try:
+        from src.spectral import compute_spectral_indices
+        result = compute_spectral_indices(tmp_path, output_size=64)
+        return SpectralResponse(**result)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Spectral analysis failed: {exc}") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Poverty proxy — wealth index from land-cover probabilities
+# ---------------------------------------------------------------------------
+
+@app.post("/poverty-proxy", response_model=PovertyResponse)
+async def poverty_proxy(file: UploadFile = File(...)) -> PovertyResponse:
+    """Estimate an economic wealth index from satellite land-cover classification.
+
+    Combines ResNet-50 land-cover probabilities with class-level wealth weights
+    calibrated to the Jean et al. (2016) and Yeh et al. (2020) NTL-based
+    poverty-estimation methodology — see notebooks/05_poverty_proxy_nightlights.ipynb.
+    """
+    if classifier is None:
+        raise HTTPException(status_code=503, detail="Classifier not loaded.")
+
+    content = await file.read()
+    tmp_path = _save_upload(file, content)
+    try:
+        tensor = preprocess_image(tmp_path, settings.image_size).unsqueeze(0).to(device)
+        with torch.inference_mode():
+            logits = classifier(tensor)
+            probs  = torch.softmax(logits, dim=1).squeeze(0).cpu()
+
+        class_probs = {name: round(float(probs[i]), 6) for i, name in enumerate(class_names)}
+
+        from src.poverty import compute_poverty_proxy
+        result = compute_poverty_proxy(class_probs)
+        return PovertyResponse(**result)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Poverty proxy failed: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)

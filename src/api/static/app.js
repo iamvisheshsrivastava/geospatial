@@ -486,3 +486,165 @@ document.getElementById('btn-lidar').addEventListener('click', async () => {
     document.getElementById('msg-lidar').textContent = `Error: ${e.message}`;
   } finally { btn.disabled = false; btn.textContent = 'Analyse Point Cloud'; }
 });
+
+// ─── TAB 6: XAI / GRADCAM ────────────────────────────────────────────────────
+let fileExplain = null;
+
+setupDropzone('dropzone-explain', 'file-explain', f => {
+  fileExplain = f;
+  showImagePreview('img-explain', 'preview-explain', f);
+});
+
+document.querySelectorAll('.sample-explain').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    fileExplain = await loadSample(btn.dataset.file);
+    showSamplePreview('img-explain', 'preview-explain', btn.dataset.file);
+    document.getElementById('msg-explain').textContent = `Sample loaded: ${btn.dataset.label}`;
+  });
+});
+
+document.getElementById('btn-explain').addEventListener('click', async () => {
+  if (!fileExplain) { document.getElementById('msg-explain').textContent = 'Choose an image first.'; return; }
+  clearResult('result-explain', 'result-explain-empty');
+  const btn = document.getElementById('btn-explain');
+  btn.disabled = true; btn.textContent = 'Running GradCAM...';
+  const timer = startProgress('prog-explain-fill', 'prog-explain-pct', 20000);
+  try {
+    const fd = new FormData(); fd.append('file', fileExplain);
+    const r = await fetch('/explain', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'GradCAM failed');
+
+    finishProgress('prog-explain-fill', 'prog-explain-pct', timer);
+    document.getElementById('result-explain-empty').classList.add('hidden');
+    document.getElementById('result-explain').classList.remove('hidden');
+    document.getElementById('explain-emoji').textContent  = CLASS_EMOJI[d.predicted_class] || '🛰️';
+    document.getElementById('explain-class').textContent  = d.predicted_class;
+    document.getElementById('explain-conf').textContent   = `${Math.round(d.confidence * 100)}% confidence`;
+    document.getElementById('gradcam-img').src = `data:image/png;base64,${d.gradcam_b64}`;
+    document.getElementById('msg-explain').textContent = '✓ GradCAM complete';
+  } catch(e) {
+    finishProgress('prog-explain-fill', 'prog-explain-pct', timer);
+    document.getElementById('msg-explain').textContent = `Error: ${e.message}`;
+  } finally { btn.disabled = false; btn.textContent = 'Run GradCAM Explanation'; }
+});
+
+// ─── TAB 7: POVERTY PROXY ────────────────────────────────────────────────────
+let filePoverty = null;
+
+setupDropzone('dropzone-poverty', 'file-poverty', f => {
+  filePoverty = f;
+  showImagePreview('img-poverty', 'preview-poverty', f);
+});
+
+document.querySelectorAll('.sample-poverty').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    filePoverty = await loadSample(btn.dataset.file);
+    showSamplePreview('img-poverty', 'preview-poverty', btn.dataset.file);
+    document.getElementById('msg-poverty').textContent = `Sample loaded: ${btn.dataset.label}`;
+  });
+});
+
+document.getElementById('btn-poverty').addEventListener('click', async () => {
+  if (!filePoverty) { document.getElementById('msg-poverty').textContent = 'Choose an image first.'; return; }
+  clearResult('result-poverty', 'result-poverty-empty');
+  const btn = document.getElementById('btn-poverty');
+  btn.disabled = true; btn.textContent = 'Estimating...';
+  const timer = startProgress('prog-poverty-fill', 'prog-poverty-pct', 15000);
+  try {
+    const fd = new FormData(); fd.append('file', filePoverty);
+    const r = await fetch('/poverty-proxy', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Poverty proxy failed');
+
+    finishProgress('prog-poverty-fill', 'prog-poverty-pct', timer);
+    document.getElementById('result-poverty-empty').classList.add('hidden');
+    document.getElementById('result-poverty').classList.remove('hidden');
+
+    // Badge styling
+    const badge = document.getElementById('poverty-badge');
+    badge.style.borderColor = d.wealth_color;
+    badge.style.backgroundColor = d.wealth_color + '15';
+    document.getElementById('poverty-label').textContent = d.wealth_label;
+    document.getElementById('poverty-label').style.color = d.wealth_color;
+    document.getElementById('poverty-interpretation').textContent = d.interpretation;
+    document.getElementById('poverty-score').textContent = d.wealth_index.toFixed(3);
+    document.getElementById('poverty-score').style.color = d.wealth_color;
+    document.getElementById('poverty-score-pct').textContent = `${Math.round(d.wealth_index * 100)}%`;
+
+    // Progress bar
+    const bar = document.getElementById('poverty-bar');
+    bar.style.backgroundColor = d.wealth_color;
+    setTimeout(() => { bar.style.width = `${Math.round(d.wealth_index * 100)}%`; }, 100);
+
+    // Contributors
+    const contribs = document.getElementById('poverty-contributors');
+    contribs.innerHTML = '';
+    d.top_contributors.forEach(c => {
+      const pct = Math.round(c.probability * 100);
+      contribs.innerHTML += `
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-36 truncate font-medium text-slate-700">${CLASS_EMOJI[c.class] || '•'} ${c.class}</span>
+          <div class="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div class="h-full rounded-full bg-amber-400" style="width:${pct}%"></div>
+          </div>
+          <span class="text-slate-500 w-10 text-right">${pct}%</span>
+          <span class="text-slate-400 w-16 text-right">×${c.weight.toFixed(2)} wt</span>
+        </div>`;
+    });
+    document.getElementById('poverty-methodology').textContent = d.methodology;
+    document.getElementById('msg-poverty').textContent = '✓ Wealth index estimated';
+  } catch(e) {
+    finishProgress('prog-poverty-fill', 'prog-poverty-pct', timer);
+    document.getElementById('msg-poverty').textContent = `Error: ${e.message}`;
+  } finally { btn.disabled = false; btn.textContent = 'Estimate Wealth Index'; }
+});
+
+// ─── TAB 8: SPECTRAL ANALYSIS ────────────────────────────────────────────────
+let fileSpectral = null;
+
+setupDropzone('dropzone-spectral', 'file-spectral', f => {
+  fileSpectral = f;
+  showImagePreview('img-spectral', 'preview-spectral', f);
+});
+
+document.querySelectorAll('.sample-spectral').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    fileSpectral = await loadSample(btn.dataset.file);
+    showSamplePreview('img-spectral', 'preview-spectral', btn.dataset.file);
+    document.getElementById('msg-spectral').textContent = `Sample loaded: ${btn.dataset.label}`;
+  });
+});
+
+document.getElementById('btn-spectral').addEventListener('click', async () => {
+  if (!fileSpectral) { document.getElementById('msg-spectral').textContent = 'Choose an image first.'; return; }
+  clearResult('result-spectral', 'result-spectral-empty');
+  const btn = document.getElementById('btn-spectral');
+  btn.disabled = true; btn.textContent = 'Analysing...';
+  const timer = startProgress('prog-spectral-fill', 'prog-spectral-pct', 8000);
+  try {
+    const fd = new FormData(); fd.append('file', fileSpectral);
+    const r = await fetch('/spectral', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Spectral analysis failed');
+
+    finishProgress('prog-spectral-fill', 'prog-spectral-pct', timer);
+    document.getElementById('result-spectral-empty').classList.add('hidden');
+    document.getElementById('result-spectral').classList.remove('hidden');
+
+    document.getElementById('spectral-veg').src   = `data:image/png;base64,${d.vegetation_b64}`;
+    document.getElementById('spectral-water').src  = `data:image/png;base64,${d.water_b64}`;
+    document.getElementById('spectral-urban').src  = `data:image/png;base64,${d.urban_b64}`;
+
+    const fmt = v => (v >= 0 ? '+' : '') + v.toFixed(3);
+    document.getElementById('spectral-veg-val').textContent   = `mean VARI: ${fmt(d.vegetation_mean)}`;
+    document.getElementById('spectral-water-val').textContent = `mean ExWI: ${fmt(d.water_mean)}`;
+    document.getElementById('spectral-urban-val').textContent = `mean ExUI: ${fmt(d.urban_mean)}`;
+
+    document.getElementById('spectral-interpretation').textContent = d.interpretation;
+    document.getElementById('msg-spectral').textContent = '✓ Spectral analysis complete';
+  } catch(e) {
+    finishProgress('prog-spectral-fill', 'prog-spectral-pct', timer);
+    document.getElementById('msg-spectral').textContent = `Error: ${e.message}`;
+  } finally { btn.disabled = false; btn.textContent = 'Analyse Spectral Indices'; }
+});
