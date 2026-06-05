@@ -1,6 +1,6 @@
 {
-  "best_model": "",
-  "autoencoder": "",
-  "segmentation": "",
-  "_note": "File IDs are auto-updated by train_on_colab.ipynb after each training run. Empty strings fall back to GitHub Releases."
+  "best_model": "16u1gdV8cU-DC_Ro5-64wN5L_DovUOZIC",
+  "autoencoder": "18Xi5G9P2_NuIe0TM7bTkEUSBB8HHl9d4",
+  "segmentation": "1x2xrrFRTJtBNjkAABm03XDZkyCDWGHS6",
+  "_note": "Auto-updated by train_on_colab.ipynb \u2014 do not edit manually."
 }
