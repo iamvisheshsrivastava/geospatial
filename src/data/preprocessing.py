@@ -16,8 +16,22 @@ _IMAGENET_MEAN = [0.485, 0.456, 0.406]
 _IMAGENET_STD = [0.229, 0.224, 0.225]
 
 
+_PIL_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
 def read_geospatial_rgb(path: Path) -> np.ndarray:
-    """Read a GeoTIFF (or standard image) and return a float32 HWC array in [0, 1]."""
+    """Read a GeoTIFF (or standard image) and return a float32 HWC array in [0, 1].
+
+    For standard image formats (jpg/png) PIL is used directly — rasterio is only
+    invoked for GeoTIFF/raster formats to avoid the slow NotGeoreferencedWarning
+    fallback that makes EuroSAT JPEG loading ~50× slower than necessary.
+    """
+    if Path(path).suffix.lower() in _PIL_EXTENSIONS:
+        from PIL import Image
+        img = Image.open(path).convert("RGB")
+        data = np.array(img).transpose(2, 0, 1).astype(np.float32)
+        return (data / 255.0).transpose(1, 2, 0).astype(np.float32)
+
     if _HAS_RASTERIO:
         with rasterio.open(path) as src:
             data = src.read()  # (bands, H, W)
