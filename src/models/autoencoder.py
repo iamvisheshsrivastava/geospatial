@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import torch
 import torch.nn as nn
 
@@ -21,23 +20,28 @@ def _up_block(in_ch: int, out_ch: int) -> nn.Sequential:
     )
 
 
+def _decoder_params(image_size: int) -> tuple[int, int]:
+    """Return (init_size, n_up_blocks) so init_size * 2**n_up_blocks == image_size.
+
+    Works by repeatedly halving image_size while it is even, up to 5 times.
+    Examples: 224 → (7, 5)  because 7*32=224
+              64  → (2, 5)  because 2*32=64
+              128 → (4, 5)  because 4*32=128
+    """
+    n, s = 0, image_size
+    while s % 2 == 0 and n < 5:
+        s //= 2
+        n += 1
+    return s, n
+
+
 def _build_decoder(
     bottleneck_ch: int,
     image_size: int,
-    n_up_blocks: int,
     channel_seq: list[int],
 ) -> nn.Sequential:
-    """Build a decoder that produces (3, image_size, image_size) from (bottleneck_ch, 1, 1).
-
-    The initial ConvTranspose2d kernel is chosen so that after n_up_blocks×2 upsampling
-    the spatial size exactly matches image_size.
-
-    init_size = image_size // (2 ** n_up_blocks)
-    kernel    = init_size  (no padding, stride 1 → output = kernel)
-    """
-    init_size = image_size // (2 ** n_up_blocks)
-    if init_size < 1:
-        init_size = 1
+    """Build a decoder that produces (3, image_size, image_size) from (bottleneck_ch, 1, 1)."""
+    init_size, n_up_blocks = _decoder_params(image_size)
 
     layers: list[nn.Module] = [
         nn.ConvTranspose2d(bottleneck_ch, channel_seq[0],
@@ -91,12 +95,9 @@ class CAE2Conv(_BaseAutoencoder):
             _conv_block(64, 128, stride=2),
             nn.AdaptiveAvgPool2d(1),
         )
-        # 2 stride-2 encoder blocks → need 5 up-blocks to reach 224, or 4 for 64, etc.
-        n_up = max(1, round(math.log2(image_size)) - 2)
         self.decoder = _build_decoder(
             bottleneck_ch=128,
             image_size=image_size,
-            n_up_blocks=n_up,
             channel_seq=[64, 32, 16, 8, 4, 3],
         )
 
@@ -112,11 +113,9 @@ class CAE3Conv(_BaseAutoencoder):
             _conv_block(64, 128, stride=2),
             nn.AdaptiveAvgPool2d(1),
         )
-        n_up = max(1, round(math.log2(image_size)) - 2)
         self.decoder = _build_decoder(
             bottleneck_ch=128,
             image_size=image_size,
-            n_up_blocks=n_up,
             channel_seq=[128, 64, 32, 16, 8, 3],
         )
 
@@ -135,11 +134,9 @@ class CAEVariedFilter(_BaseAutoencoder):
             nn.BatchNorm2d(128), nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d(1),
         )
-        n_up = max(1, round(math.log2(image_size)) - 2)
         self.decoder = _build_decoder(
             bottleneck_ch=128,
             image_size=image_size,
-            n_up_blocks=n_up,
             channel_seq=[128, 64, 32, 16, 8, 3],
         )
 
