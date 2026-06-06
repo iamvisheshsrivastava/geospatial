@@ -202,8 +202,11 @@
               <div><div class="text-xs text-slate-500">Detection result</div><div class="text-xl font-bold" id="anomaly-label">—</div></div>
               <div class="ml-auto text-right"><div class="text-xs text-slate-500">Anomaly score</div><div class="text-2xl font-bold" id="anomaly-score">—</div></div>
             </div>
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Reconstruction error heatmap <span class="normal-case font-normal">(red = high error = anomalous)</span></div>
-            <canvas id="heatmap-anomaly" class="heatmap-canvas w-full rounded-lg border border-slate-200" height="160"></canvas>
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Reconstruction error heatmap</div>
+            <canvas id="heatmap-anomaly" class="heatmap-canvas w-full rounded-lg border border-slate-200" style="image-rendering:pixelated" height="160"></canvas>
+            <div class="flex justify-between text-xs text-slate-400 mt-1 px-1">
+              <span>🔵 Low error (normal)</span><span>🟡 Medium</span><span>🔴 High error (anomalous)</span>
+            </div>
           </div>
         </div>
       </div>
@@ -261,8 +264,11 @@
               <div><div class="text-xs text-slate-500">Change detected</div><div class="text-xl font-bold" id="change-label">—</div></div>
               <div class="ml-auto text-right"><div class="text-xs text-slate-500">Change score</div><div class="text-2xl font-bold" id="change-score">—</div></div>
             </div>
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Change map <span class="normal-case font-normal">(bright = changed)</span></div>
-            <canvas id="heatmap-change" class="heatmap-canvas w-full rounded-lg border border-slate-200" height="160"></canvas>
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Change map</div>
+            <canvas id="heatmap-change" class="heatmap-canvas w-full rounded-lg border border-slate-200" style="image-rendering:pixelated" height="160"></canvas>
+            <div class="flex justify-between text-xs text-slate-400 mt-1 px-1">
+              <span>🔵 No change</span><span>🟡 Moderate</span><span>🔴 High change</span>
+            </div>
           </div>
         </div>
       </div>
