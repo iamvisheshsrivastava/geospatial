@@ -372,7 +372,18 @@ async def segment(
 
     # Lazy-load segmentation model on first request.
     if segmentation_model is None:
-        # Try to load without freeing anything first (works if enough RAM).
+        # Mask R-CNN needs ~400 MB.  On constrained dynos (512 MB total) we
+        # MUST free the lightweight models first — don't wait for an OOM.
+        global classifier, autoencoder
+        classifier = None
+        autoencoder = None
+        try:
+            from src.change_detection import unload_encoder as _unload_cd
+            _unload_cd()
+        except Exception:
+            pass
+        gc.collect()
+
         load_ok = False
         load_err: Exception | None = None
         try:
@@ -381,38 +392,20 @@ async def segment(
         except FileNotFoundError as exc:
             load_err = exc
         except (MemoryError, RuntimeError) as exc:
-            # OOM on first try — free lightweight models and retry once.
-            global classifier, autoencoder
-            _prev_cls = classifier
-            _prev_ae  = autoencoder
-            classifier = None
-            autoencoder = None
-            try:
-                from src.change_detection import unload_encoder as _unload_cd
-                _unload_cd()
-            except Exception:
-                pass
-            gc.collect()
-            try:
-                load_segmentation()
-                load_ok = True
-            except (MemoryError, RuntimeError) as exc2:
-                # Restore lightweight models and surface OOM message
-                try: load_classifier()
-                except Exception: pass
-                try: load_anomaly_detector()
-                except Exception: pass
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        "Segmentation requires ~400 MB RAM. Not enough memory available. "
-                        "Run locally with `docker compose up` for full functionality."
-                    )
-                ) from exc2
-            except Exception as exc2:
-                load_err = exc2
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Segmentation requires ~400 MB RAM. Not enough memory available. "
+                    "Run locally with `docker compose up` for full functionality."
+                )
+            ) from exc
 
         if not load_ok:
+            # Restore lightweight models before returning error
+            try: load_classifier()
+            except Exception: pass
+            try: load_anomaly_detector()
+            except Exception: pass
             raise HTTPException(
                 status_code=503,
                 detail="Segmentation model checkpoint not found. Train the model first (see README)."

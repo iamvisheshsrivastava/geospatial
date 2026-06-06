@@ -348,10 +348,10 @@ setupDropzone('dropzone-after', 'file-after', f => {
 
 document.getElementById('sample-change').addEventListener('click', async () => {
   try {
-    fileBefore = await loadSample('forest.jpg');
+    fileBefore = await loadSample('change_before.jpg');
     fileAfter  = await loadSample('change_after.jpg');
     const ib = document.getElementById('img-before');
-    ib.src = '/static/samples/forest.jpg'; ib.classList.remove('hidden');
+    ib.src = '/static/samples/change_before.jpg'; ib.classList.remove('hidden');
     const ia = document.getElementById('img-after');
     ia.src = '/static/samples/change_after.jpg'; ia.classList.remove('hidden');
     document.getElementById('msg-change').textContent = '✓ Sample loaded: forest before/after deforestation';
