@@ -185,11 +185,25 @@ def load_anomaly_detector() -> None:
 
 
 def load_segmentation() -> None:
-    """Load segmentation model on demand — called lazily to save RAM."""
+    """Load segmentation model on demand — called lazily to save RAM.
+
+    After loading, the model's internal GeneralizedRCNN transform is constrained
+    to a small image size (256 px) so that intermediate feature-map activations
+    during inference stay around 15–20 MB instead of the default ~200 MB that
+    the standard 800×1333 transform produces.  Detection quality is reduced, but
+    the endpoint stays alive on a 512 MB Heroku dyno.
+    """
     global segmentation_model
     from src.models.segmentation import load_segmentation_model
     path = _ensure_file(settings.segmentation_path, settings.s3_segmentation_key)
-    segmentation_model = load_segmentation_model(path, device)
+    model = load_segmentation_model(path, device)
+    # Constrain internal resize so activations fit in a 512 MB dyno.
+    # Default: min_size=800, max_size=1333 → ~200 MB activations.
+    # Reduced: min_size=256, max_size=320 → ~15 MB activations.
+    if hasattr(model, "transform"):
+        model.transform.min_size = (256,)
+        model.transform.max_size = 320
+    segmentation_model = model
 
 
 def unload_segmentation() -> None:
@@ -372,8 +386,7 @@ async def segment(
 
     # Lazy-load segmentation model on first request.
     if segmentation_model is None:
-        # Mask R-CNN needs ~400 MB.  On constrained dynos (512 MB total) we
-        # MUST free the lightweight models first — don't wait for an OOM.
+        # Free the lightweight models first to make room for Mask R-CNN.
         global classifier, autoencoder
         classifier = None
         autoencoder = None
@@ -384,6 +397,36 @@ async def segment(
             pass
         gc.collect()
 
+        # ── Pre-flight memory guard ──────────────────────────────────────────
+        # Loading Mask R-CNN needs ~180 MB peak (mmap-assisted) + ~15 MB for
+        # inference activations at the reduced 256 px transform.
+        # If MemAvailable on /proc/meminfo is below our safety threshold,
+        # return a graceful 503 rather than letting the OS OOM-kill the dyno.
+        _avail_mb: float = 0.0
+        try:
+            with open("/proc/meminfo") as _f:
+                for _line in _f:
+                    if _line.startswith("MemAvailable:"):
+                        _avail_mb = int(_line.split()[1]) / 1024  # kB → MB
+                        break
+        except Exception:
+            pass  # Not Linux or /proc unavailable — skip guard
+
+        if 0 < _avail_mb < 200:
+            try: load_classifier()
+            except Exception: pass
+            try: load_anomaly_detector()
+            except Exception: pass
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Not enough RAM for Mask R-CNN ({_avail_mb:.0f} MB available, "
+                    "~200 MB needed). Free-tier limit reached. "
+                    "Run locally with `docker compose up` for full segmentation."
+                ),
+            )
+        # ────────────────────────────────────────────────────────────────────
+
         load_ok = False
         load_err: Exception | None = None
         try:
@@ -392,10 +435,14 @@ async def segment(
         except FileNotFoundError as exc:
             load_err = exc
         except (MemoryError, RuntimeError) as exc:
+            try: load_classifier()
+            except Exception: pass
+            try: load_anomaly_detector()
+            except Exception: pass
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "Segmentation requires ~400 MB RAM. Not enough memory available. "
+                    "Segmentation requires ~200 MB RAM. Not enough memory available. "
                     "Run locally with `docker compose up` for full functionality."
                 )
             ) from exc

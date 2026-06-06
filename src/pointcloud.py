@@ -182,7 +182,7 @@ def segment_trees(
     # Assign each point to nearest tree top
     from scipy.spatial import cKDTree
     tree = cKDTree(top_xy)
-    _, tree_ids = tree.query(xy, k=1, workers=-1)
+    _, tree_ids = tree.query(xy, k=1, workers=1)
 
     segments: list[TreeSegment] = []
     for tid in range(len(top_xy)):

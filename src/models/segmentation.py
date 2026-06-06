@@ -124,8 +124,20 @@ def load_segmentation_model(checkpoint_path: Path, device: torch.device, num_cla
     Handles both:
     - Full COCO pretrained checkpoint (91 classes, saved via torch.save(model.state_dict()))
     - Fine-tuned tree crown checkpoint (2 classes: background + tree)
+
+    Uses mmap=True when available (PyTorch ≥ 2.1) to avoid the double-memory peak
+    that occurs when both the state-dict tensors and the model parameters are in RAM
+    simultaneously.  Without mmap the peak is ~2× model size (~340 MB for Mask R-CNN);
+    with mmap the OS pages state-dict data in on demand and can evict clean pages
+    immediately, keeping peak near the model size alone (~170 MB).
     """
-    ckpt  = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    try:
+        ckpt = torch.load(
+            checkpoint_path, map_location=device, weights_only=False, mmap=True
+        )
+    except TypeError:
+        # mmap parameter not available in this PyTorch build — fall back
+        ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = ckpt.get("model_state_dict", ckpt)
 
     # Detect num_classes from the box predictor weight shape
