@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 import tempfile
 from pathlib import Path
 from typing import AsyncIterator
+
+# Heroku always injects the DYNO env var (e.g. "web.1").
+# On any other host (local Docker, Railway, etc.) it is absent.
+# We use this to gate the segmentation endpoint: Mask R-CNN needs ~500 MB
+# alongside the other models, which exceeds Heroku's 512 MB dyno limit and
+# triggers an OS-level OOM kill that brings down the entire process.
+_HEROKU = bool(os.getenv("DYNO"))
 
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -383,6 +391,23 @@ async def segment(
     The lightweight classifier and autoencoder are temporarily freed to make room.
     """
     import gc
+
+    # ── Heroku guard ─────────────────────────────────────────────────────────
+    # Mask R-CNN needs ~500 MB alongside Python/torch/other models.
+    # Heroku Eco dynos have 512 MB total — attempting to load causes the OS
+    # OOM-killer to SIGKILL the entire process, taking down every other
+    # endpoint with it.  Return a fast JSON 503 before touching any model.
+    if _HEROKU:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Tree crown segmentation requires ~500 MB RAM for Mask R-CNN. "
+                "The free Heroku dyno (512 MB total) cannot run all models at once — "
+                "loading it would crash the entire application. "
+                "Clone the repo and run `docker compose up` locally for the full demo."
+            ),
+        )
+    # ─────────────────────────────────────────────────────────────────────────
 
     # Lazy-load segmentation model on first request.
     if segmentation_model is None:

@@ -458,8 +458,25 @@ document.getElementById('btn-segment').addEventListener('click', async () => {
     document.getElementById('msg-segment').textContent = `✓ Found ${d.num_trees} tree crown${d.num_trees!==1?'s':''}`;
   } catch(e) {
     finishProgress('prog-segment-fill', 'prog-segment-pct', timer);
-    resetRightPanel('result-segment-empty', '🌳', 'Upload an aerial image to detect tree crowns');
-    document.getElementById('msg-segment').textContent = `Error: ${e.message}`;
+    const msg = (e.message || '').toLowerCase();
+    // Detect RAM / free-tier errors from the API and show a polished card
+    // instead of a raw error string so the UI stays clean.
+    if (msg.includes('ram') || msg.includes('memory') || msg.includes('heroku') ||
+        msg.includes('500 mb') || msg.includes('dyno') || msg.includes('free')) {
+      document.getElementById('result-segment-empty').innerHTML = `
+        <div class="text-4xl mb-3">🖥️</div>
+        <div class="text-sm font-semibold text-slate-700 mb-2">Not available on free deployment</div>
+        <div class="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
+          Mask R-CNN needs ~500 MB RAM — more than the free Heroku tier (512 MB) allows
+          when all models are loaded together.<br><br>
+          <span class="text-slate-500 font-medium">To run locally:</span><br>
+          <code class="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-xs">git clone …  →  docker compose up</code>
+        </div>`;
+      document.getElementById('msg-segment').textContent = '';
+    } else {
+      resetRightPanel('result-segment-empty', '🌳', 'Upload an aerial image to detect tree crowns');
+      document.getElementById('msg-segment').textContent = `Error: ${e.message}`;
+    }
   } finally { btn.disabled = false; btn.textContent = 'Detect Tree Crowns'; }
 });
 
