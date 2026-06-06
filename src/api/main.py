@@ -202,13 +202,13 @@ def unload_segmentation() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    # Limit PyTorch to 2 threads — Railway free tier has a shared CPU and
-    # spawning many threads causes contention that slows inference down.
+    # Limit PyTorch to 2 threads — shared CPU environments benefit from
+    # capped thread counts to avoid contention that slows inference down.
     torch.set_num_threads(2)
 
     # Load only the two lightweight models at startup (~140 MB together).
     # Mask R-CNN (~200 MB) is loaded lazily on first /segment request and
-    # unloaded afterwards to stay within Railway's 512 MB free-tier limit.
+    # unloaded afterwards to conserve memory on constrained deployments.
     for loader in (load_classifier, load_anomaly_detector):
         try:
             loader()
@@ -365,7 +365,7 @@ async def segment(
     confidence scores, and mask areas. Designed for forestry inventory workflows.
 
     The model is loaded lazily on first call and unloaded after inference to
-    conserve memory on constrained deployment environments (Railway 512 MB limit).
+    conserve memory on constrained deployment environments.
     The lightweight classifier and autoencoder are temporarily freed to make room.
     """
     import gc
@@ -399,9 +399,8 @@ async def segment(
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "Segmentation requires ~400 MB RAM but this deployment is running on "
-                    "Railway's free tier (512 MB). Upgrade to a paid plan or run locally "
-                    "with docker compose up to use this feature."
+                    "Segmentation requires ~400 MB RAM. Upgrade to a larger dyno or run "
+                    "locally with docker compose up to use this feature."
                 )
             ) from exc
 

@@ -1,0 +1,14 @@
+{
+  "id": "visheshsrivastava/geospatial-train-models",
+  "title": "Geospatial ML — Train All Models",
+  "code_file": "train_models.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}
