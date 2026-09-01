@@ -62,11 +62,22 @@ class TreeSegment:
 # I/O
 # ---------------------------------------------------------------------------
 
-def read_las(path: Path) -> np.ndarray:
-    """Read a LAS/LAZ file and return an (N, 3) float32 XYZ array."""
+def read_las(path: Path, max_points: int | None = None) -> np.ndarray:
+    """Read a LAS/LAZ file and return an (N, 3) float32 XYZ array.
+
+    `max_points`, when given, is checked against the header's point count
+    *before* the (potentially expensive, decompression-heavy) full read, so an
+    oversized or maliciously dense LAZ file is rejected cheaply instead of
+    being fully decompressed into memory first.
+    """
     if not _HAS_LASPY:
         raise ImportError("laspy is required: pip install laspy")
     with laspy.open(path) as f:
+        if max_points is not None and f.header.point_count > max_points:
+            raise ValueError(
+                f"Point cloud has {f.header.point_count:,} points, which exceeds "
+                f"the {max_points:,} point limit."
+            )
         las = f.read()
     xyz = np.stack([
         np.asarray(las.x, dtype=np.float32),
@@ -229,12 +240,16 @@ def to_open3d(xyz: np.ndarray, colour_by_height: bool = True):  # type: ignore[r
 # Public pipeline — single call used by the API
 # ---------------------------------------------------------------------------
 
-def process_las_file(path: Path) -> dict[str, Any]:
+def process_las_file(path: Path, max_points: int | None = None) -> dict[str, Any]:
     """Full pipeline: read → normalise → stats → segment trees.
+
+    `max_points` caps the header-reported point count before the full
+    decompress/read happens (see `read_las`) — guards against a small
+    compressed LAZ file that decompresses to an unbounded number of points.
 
     Returns a JSON-serialisable dict ready for the /pointcloud API endpoint.
     """
-    xyz_raw = read_las(path)
+    xyz_raw = read_las(path, max_points=max_points)
     xyz = normalise_height(xyz_raw)
     stats = compute_stats(xyz)
     trees = segment_trees(xyz)

@@ -259,12 +259,87 @@ app.router.lifespan_context = lifespan
 # Utility
 # ---------------------------------------------------------------------------
 
+async def _read_upload_capped(upload: UploadFile) -> bytes:
+    """Read an UploadFile in bounded chunks, rejecting once it exceeds MAX_UPLOAD_MB.
+
+    Reading in chunks (rather than `await upload.read()`) means an oversized
+    upload is rejected as soon as the cap is crossed instead of first being
+    buffered into memory in full.
+    """
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    chunk_size = 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {settings.max_upload_mb} MB limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _save_upload(upload: UploadFile, content: bytes) -> Path:
     suffix = Path(upload.filename or "upload.tif").suffix or ".tif"
-    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    tmp.write(content)
-    tmp.close()
+    try:
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp.write(content)
+        tmp.close()
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid upload: {exc}") from exc
     return Path(tmp.name)
+
+
+def _cgroup_available_mb() -> float | None:
+    """Return available memory in MB from the container's cgroup limit, or None.
+
+    Returns None when no cgroup memory-limit file is readable (e.g. not running
+    inside a container), so callers can fall back to a host-level check.
+    """
+    try:
+        # cgroup v2 (Docker/Railway/k8s default on modern kernels)
+        max_path = Path("/sys/fs/cgroup/memory.max")
+        cur_path = Path("/sys/fs/cgroup/memory.current")
+        if max_path.exists() and cur_path.exists():
+            max_raw = max_path.read_text().strip()
+            if max_raw != "max":  # "max" means no limit set — not useful here
+                limit = int(max_raw)
+                current = int(cur_path.read_text().strip())
+                return (limit - current) / (1024 * 1024)
+    except Exception:
+        pass
+
+    try:
+        # cgroup v1 fallback (older Docker/Heroku)
+        limit_path = Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+        usage_path = Path("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+        if limit_path.exists() and usage_path.exists():
+            limit = int(limit_path.read_text().strip())
+            # cgroup v1 reports a huge sentinel (close to 2**63) for "unlimited"
+            if limit < (1 << 62):
+                usage = int(usage_path.read_text().strip())
+                return (limit - usage) / (1024 * 1024)
+    except Exception:
+        pass
+
+    return None
+
+
+def _host_available_mb() -> float:
+    """Return available memory in MB from /proc/meminfo (host-level, not container-aware)."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024  # kB → MB
+    except Exception:
+        pass  # Not Linux or /proc unavailable
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +370,7 @@ def health() -> HealthResponse:
 async def predict(file: UploadFile = File(...)) -> PredictionResponse:
     if classifier is None:
         raise HTTPException(status_code=503, detail="Classifier not loaded.")
-    content = await file.read()
+    content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
         tensor = preprocess_image(tmp_path, settings.image_size).unsqueeze(0).to(device)
@@ -326,7 +401,7 @@ async def anomaly_detect(
     """
     if autoencoder is None:
         raise HTTPException(status_code=503, detail="Anomaly detector not loaded.")
-    content = await file.read()
+    content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
         from src.anomaly import compute_anomaly_score
@@ -356,11 +431,15 @@ async def change_detect(
     Feature-space comparison is robust to illumination and sensor differences.
     Returns a per-region change map and a scalar change score in [0, 1].
     """
-    before_content = await before.read()
-    after_content = await after.read()
-    before_path = _save_upload(before, before_content)
-    after_path = _save_upload(after, after_content)
+    before_content = await _read_upload_capped(before)
+    after_content = await _read_upload_capped(after)
+    tmp_paths: list[Path] = []
     try:
+        before_path = _save_upload(before, before_content)
+        tmp_paths.append(before_path)
+        after_path = _save_upload(after, after_content)
+        tmp_paths.append(after_path)
+
         from src.change_detection import detect_change
         result = detect_change(before_path, after_path, settings.image_size, device, threshold)
         return ChangeDetectionResponse(
@@ -369,11 +448,13 @@ async def change_detect(
             threshold=result["threshold"],
             change_map=result["change_map"],
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Change detection failed: {exc}") from exc
     finally:
-        before_path.unlink(missing_ok=True)
-        after_path.unlink(missing_ok=True)
+        for _p in tmp_paths:
+            _p.unlink(missing_ok=True)
 
 
 @app.post("/segment", response_model=SegmentationResponse)
@@ -425,17 +506,15 @@ async def segment(
         # ── Pre-flight memory guard ──────────────────────────────────────────
         # Loading Mask R-CNN needs ~180 MB peak (mmap-assisted) + ~15 MB for
         # inference activations at the reduced 256 px transform.
-        # If MemAvailable on /proc/meminfo is below our safety threshold,
-        # return a graceful 503 rather than letting the OS OOM-kill the dyno.
-        _avail_mb: float = 0.0
-        try:
-            with open("/proc/meminfo") as _f:
-                for _line in _f:
-                    if _line.startswith("MemAvailable:"):
-                        _avail_mb = int(_line.split()[1]) / 1024  # kB → MB
-                        break
-        except Exception:
-            pass  # Not Linux or /proc unavailable — skip guard
+        # If available memory is below our safety threshold, return a graceful
+        # 503 rather than letting the OS OOM-kill the container. Available
+        # memory is computed from the container's cgroup limit (Docker/
+        # Railway/Heroku/k8s all use cgroups) since /proc/meminfo reports the
+        # *host's* memory, not the container's, and never reflects the
+        # cgroup cap under any of these runtimes.
+        _avail_mb: float | None = _cgroup_available_mb()
+        if _avail_mb is None:
+            _avail_mb = _host_available_mb()  # not containerized — fall back to host check
 
         if 0 < _avail_mb < 200:
             try: load_classifier()
@@ -483,7 +562,7 @@ async def segment(
                 detail="Segmentation model checkpoint not found. Train the model first (see README)."
             )
 
-    content = await file.read()
+    content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
         from PIL import Image
@@ -523,15 +602,11 @@ async def pointcloud_analyse(file: UploadFile = File(...)) -> PointCloudResponse
     This endpoint implements the core forest inventory pipeline used by
     airborne LiDAR survey companies.
     """
-    content = await file.read()
-    suffix = Path(file.filename or "scan.las").suffix or ".las"
-    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    tmp.write(content)
-    tmp.close()
-    tmp_path = Path(tmp.name)
+    content = await _read_upload_capped(file)
+    tmp_path = _save_upload(file, content)
     try:
         from src.pointcloud import process_las_file
-        result = process_las_file(tmp_path)
+        result = process_las_file(tmp_path, max_points=settings.max_pointcloud_points)
         return PointCloudResponse(**result)
     except ImportError as exc:
         raise HTTPException(status_code=501, detail=f"LiDAR processing unavailable: {exc}") from exc
@@ -555,7 +630,7 @@ async def explain(file: UploadFile = File(...)) -> ExplainResponse:
     if classifier is None:
         raise HTTPException(status_code=503, detail="Classifier not loaded.")
 
-    content = await file.read()
+    content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
         # First run classification to get predicted class
@@ -597,7 +672,7 @@ async def spectral_analysis(file: UploadFile = File(...)) -> SpectralResponse:
     Returns three colour-coded heatmaps (vegetation, water, urban) and scalar
     mean values — inspired by notebooks/06_multispectral_features.ipynb.
     """
-    content = await file.read()
+    content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
         from src.spectral import compute_spectral_indices
@@ -624,7 +699,7 @@ async def poverty_proxy(file: UploadFile = File(...)) -> PovertyResponse:
     if classifier is None:
         raise HTTPException(status_code=503, detail="Classifier not loaded.")
 
-    content = await file.read()
+    content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
         tensor = preprocess_image(tmp_path, settings.image_size).unsqueeze(0).to(device)

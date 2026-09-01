@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     image_size: int = Field(default=224, alias="IMAGE_SIZE")
     device: str = Field(default="cpu", alias="DEVICE")
 
+    # Upload guards
+    max_upload_mb: int = Field(default=25, alias="MAX_UPLOAD_MB")
+    max_pointcloud_points: int = Field(default=5_000_000, alias="MAX_POINTCLOUD_POINTS")
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
 
