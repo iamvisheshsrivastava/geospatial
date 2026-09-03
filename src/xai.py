@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from src.data.preprocessing import preprocess_image
+from src.data.preprocessing import assert_safe_image_pixels, preprocess_image
 
 
 def gradcam_explain(
@@ -42,7 +42,9 @@ def gradcam_explain(
     from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
     # Original image for overlay (un-normalised, [0,1] float32)
-    orig = Image.open(image_path).convert("RGB").resize((image_size, image_size))
+    orig = Image.open(image_path)
+    assert_safe_image_pixels(*orig.size)
+    orig = orig.convert("RGB").resize((image_size, image_size))
     rgb_float = np.array(orig, dtype=np.float32) / 255.0
 
     # ImageNet-normalised tensor for the model

@@ -18,6 +18,29 @@ _IMAGENET_STD = [0.229, 0.224, 0.225]
 
 _PIL_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
+# Caps decoded pixel count at ~50 MP (≈150 MB as raw uint8 RGB). Pillow's own
+# DecompressionBombError only trips above ~179 MP (~536 MB decoded) — with the
+# 25 MB upload cap that still leaves room for a small, highly-compressible
+# image (e.g. a large flat-colour PNG) to balloon well past what a 512 MB
+# container can spare once the model and its activations are also resident.
+MAX_IMAGE_PIXELS = 50_000_000
+
+
+def assert_safe_image_pixels(width: int, height: int) -> None:
+    """Raise ValueError if width*height exceeds MAX_IMAGE_PIXELS.
+
+    Call this right after the image header is read (PIL's `Image.open` reads
+    only the header lazily; rasterio's `.width`/`.height` likewise don't
+    trigger a full decode) — i.e. before `.convert()`, `.resize()`, or
+    `.read()` decode the full pixel buffer.
+    """
+    pixels = int(width) * int(height)
+    if pixels > MAX_IMAGE_PIXELS:
+        raise ValueError(
+            f"Image is {width}x{height} ({pixels:,} px), which exceeds the "
+            f"{MAX_IMAGE_PIXELS:,} px limit."
+        )
+
 
 def read_geospatial_rgb(path: Path) -> np.ndarray:
     """Read a GeoTIFF (or standard image) and return a float32 HWC array in [0, 1].
@@ -28,16 +51,21 @@ def read_geospatial_rgb(path: Path) -> np.ndarray:
     """
     if Path(path).suffix.lower() in _PIL_EXTENSIONS:
         from PIL import Image
-        img = Image.open(path).convert("RGB")
+        img = Image.open(path)
+        assert_safe_image_pixels(*img.size)
+        img = img.convert("RGB")
         data = np.array(img).transpose(2, 0, 1).astype(np.float32)
         return (data / 255.0).transpose(1, 2, 0).astype(np.float32)
 
     if _HAS_RASTERIO:
         with rasterio.open(path) as src:
+            assert_safe_image_pixels(src.width, src.height)
             data = src.read()  # (bands, H, W)
     else:
         from PIL import Image
-        img = Image.open(path).convert("RGB")
+        img = Image.open(path)
+        assert_safe_image_pixels(*img.size)
+        img = img.convert("RGB")
         data = np.array(img).transpose(2, 0, 1).astype(np.float32)
         return (data / 255.0).transpose(1, 2, 0).astype(np.float32)
 
@@ -54,7 +82,9 @@ def preprocess_image(path: Path, image_size: int = 224) -> torch.Tensor:
         pil_img = _hwc_to_pil(hwc)
     except Exception:
         from PIL import Image
-        pil_img = Image.open(path).convert("RGB")
+        img = Image.open(path)
+        assert_safe_image_pixels(*img.size)
+        pil_img = img.convert("RGB")
 
     transform = transforms.Compose([
         transforms.Resize((image_size, image_size)),

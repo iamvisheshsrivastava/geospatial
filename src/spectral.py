@@ -16,6 +16,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from src.data.preprocessing import assert_safe_image_pixels
+
 
 # ── Colourmap helpers ─────────────────────────────────────────────────────────
 
@@ -51,7 +53,9 @@ def compute_spectral_indices(image_path: Path, output_size: int = 64) -> dict:
           vegetation_mean, water_mean, urban_mean — scalar index averages
           interpretation                          — human-readable summary
     """
-    img = Image.open(image_path).convert("RGB").resize((output_size, output_size))
+    img = Image.open(image_path)
+    assert_safe_image_pixels(*img.size)
+    img = img.convert("RGB").resize((output_size, output_size))
     arr = np.array(img, dtype=np.float32) / 255.0          # (H, W, 3), [0, 1]
 
     R, G, B = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]

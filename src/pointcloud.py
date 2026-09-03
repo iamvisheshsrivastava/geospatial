@@ -100,19 +100,44 @@ def normalise_height(xyz: np.ndarray, ground_percentile: float = 1.0) -> np.ndar
 # Canopy metrics
 # ---------------------------------------------------------------------------
 
+# Caps the CHM raster at ~100 MB (float32) regardless of the point cloud's
+# spatial extent. Without this, a LAS/LAZ file with a well-under-the-cap point
+# count but a corrupted or adversarial header scale/offset (points spread over
+# an enormous XY extent) can still blow `np.zeros((ny, nx))` past available
+# RAM — the point-count cap in `read_las` does not protect against this axis.
+_MAX_GRID_CELLS = 25_000_000
+
+
+def _safe_grid_dims(
+    x_min: float, x_max: float, y_min: float, y_max: float, cell_size: float,
+    max_cells: int = _MAX_GRID_CELLS,
+) -> tuple[int, int, float]:
+    """Return (nx, ny, cell_size), growing cell_size if needed so nx*ny <= max_cells."""
+    span_x = max(float(x_max - x_min), 0.0)
+    span_y = max(float(y_max - y_min), 0.0)
+    nx = max(1, int(span_x / cell_size) + 1)
+    ny = max(1, int(span_y / cell_size) + 1)
+    if nx * ny > max_cells:
+        scale = ((nx * ny) / max_cells) ** 0.5
+        cell_size = cell_size * scale
+        nx = max(1, int(span_x / cell_size) + 1)
+        ny = max(1, int(span_y / cell_size) + 1)
+    return nx, ny, cell_size
+
+
 def compute_stats(xyz: np.ndarray, canopy_threshold_m: float = 2.0) -> PointCloudStats:
     """Compute stand-level forest structure metrics from a normalised point cloud."""
     heights = xyz[:, 2]
     canopy_mask = heights >= canopy_threshold_m
     canopy_cover = float(canopy_mask.sum()) / len(heights)
 
-    # Estimate stem density from local Z-maxima on a 1 m grid
+    # Estimate stem density from local Z-maxima on a 1 m grid (cell size grows
+    # automatically for point clouds with an unusually large spatial extent —
+    # see _safe_grid_dims).
     xy = xyz[:, :2]
     x_min, y_min = xy.min(axis=0)
     x_max, y_max = xy.max(axis=0)
-    cell = 1.0  # 1-metre grid cells
-    nx = max(1, int((x_max - x_min) / cell))
-    ny = max(1, int((y_max - y_min) / cell))
+    nx, ny, cell = _safe_grid_dims(x_min, x_max, y_min, y_max, 1.0)
     chm = np.zeros((ny, nx), dtype=np.float32)
     ix = np.clip(((xy[:, 0] - x_min) / cell).astype(int), 0, nx - 1)
     iy = np.clip(((xy[:, 1] - y_min) / cell).astype(int), 0, ny - 1)
@@ -166,8 +191,9 @@ def segment_trees(
     x_min, y_min = xy.min(axis=0)
     x_max, y_max = xy.max(axis=0)
 
-    nx = max(1, int(np.ceil((x_max - x_min) / cell_size)))
-    ny = max(1, int(np.ceil((y_max - y_min) / cell_size)))
+    # Cell size grows automatically for point clouds with an unusually large
+    # spatial extent so the CHM raster stays memory-bounded — see _safe_grid_dims.
+    nx, ny, cell_size = _safe_grid_dims(x_min, x_max, y_min, y_max, cell_size)
 
     # Build CHM
     chm = np.zeros((ny, nx), dtype=np.float32)

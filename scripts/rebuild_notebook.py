@@ -40,7 +40,7 @@ if IS_KAGGLE:
     from kaggle_secrets import UserSecretsClient
     _secrets = UserSecretsClient()
     GITHUB_TOKEN   = _secrets.get_secret('GITHUB_TOKEN')
-    KAGGLE_API_TOK = 'KGAT_f9d042f6d3a1689faad944ab17449837'
+    KAGGLE_API_TOK = None  # Kaggle CLI is pre-authenticated in-notebook — no secret needed
     OUTPUT_DIR = Path('/kaggle/working/checkpoints')
     WORK_DIR   = Path('/kaggle/working')
 elif IS_COLAB:
@@ -101,15 +101,12 @@ if torch.cuda.is_available():
 md("""## Step 4 — Download & extract EuroSAT dataset (~90 MB)
 
 Downloads the EuroSAT RGB dataset (Sentinel-2 satellite imagery, 10 land-cover classes).
-Uses `requests` with SSL verification disabled for reliability. Validates the ZIP magic
-bytes before extracting — if the server returns an error page instead of a ZIP, we catch
-it immediately.""")
+Validates the ZIP magic bytes before extracting — if the server returns an error page
+instead of a ZIP, we catch it immediately.""")
 
 code("""\
 import os, zipfile, shutil, requests
 from pathlib import Path
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CLASSES = [
     'AnnualCrop', 'Forest', 'HerbaceousVegetation', 'Highway', 'Industrial',
@@ -125,7 +122,7 @@ if all((EUROSAT_DIR / cls).exists() for cls in CLASSES):
 else:
     URL = 'https://madm.dfki.de/files/sentinel/EuroSAT.zip'
     print(f'Downloading EuroSAT from {URL} ...')
-    resp = requests.get(URL, verify=False, stream=True, timeout=120)
+    resp = requests.get(URL, stream=True, timeout=120)
     resp.raise_for_status()
     total = int(resp.headers.get('content-length', 0))
     downloaded = 0

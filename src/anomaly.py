@@ -29,6 +29,7 @@ from torchvision import transforms
 import wandb
 
 from src.config import settings
+from src.data.preprocessing import assert_safe_image_pixels
 from src.models.autoencoder import ARCHITECTURES, _BaseAutoencoder, build_autoencoder
 
 
@@ -58,9 +59,13 @@ def preprocess_for_autoencoder(path: Path, image_size: int = 64) -> torch.Tensor
             arr = (data.astype(np.float32) / max_val).clip(0, 1)
             pil = Image.fromarray((arr.transpose(1, 2, 0) * 255).astype(np.uint8))
         except Exception:
-            pil = Image.open(path).convert("RGB")
+            pil = Image.open(path)
+            assert_safe_image_pixels(*pil.size)
+            pil = pil.convert("RGB")
     except Exception:
-        pil = Image.open(path).convert("RGB")
+        pil = Image.open(path)
+        assert_safe_image_pixels(*pil.size)
+        pil = pil.convert("RGB")
 
     return _make_transform(image_size, augment=False)(pil)
 

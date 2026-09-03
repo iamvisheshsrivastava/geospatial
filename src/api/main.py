@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.config import settings
-from src.data.preprocessing import preprocess_image
+from src.data.preprocessing import assert_safe_image_pixels, preprocess_image
 from src.models.resnet import build_resnet50_classifier
 from src.models.autoencoder import SatelliteAutoencoder
 from src.storage.s3 import download_file_from_s3
@@ -567,7 +567,9 @@ async def segment(
     try:
         from PIL import Image
         import torchvision.transforms.functional as TF
-        pil = Image.open(tmp_path).convert("RGB")
+        pil = Image.open(tmp_path)
+        assert_safe_image_pixels(*pil.size)
+        pil = pil.convert("RGB")
         img_tensor = TF.to_tensor(pil).to(device)
 
         from src.models.segmentation import run_segmentation
