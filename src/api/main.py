@@ -137,10 +137,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 app = FastAPI(
     title="Satellite Geospatial ML Platform",
     description=(
-        "Three capabilities in one API: "
-        "(1) land-cover classification, "
-        "(2) unsupervised anomaly detection, "
-        "(3) temporal change detection."
+        "Eight endpoints for satellite imagery and LiDAR analysis: land-cover "
+        "classification, unsupervised anomaly detection, temporal change detection, "
+        "tree crown segmentation, LiDAR forest inventory, GradCAM explainability, "
+        "spectral indices, and a poverty proxy estimator."
     ),
     version="2.0.0",
 )

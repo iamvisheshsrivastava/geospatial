@@ -1,7 +1,7 @@
 # Geospatial ML Platform
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.3-ee4c2c?logo=pytorch)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.4-ee4c2c?logo=pytorch)
 ![Docker](https://img.shields.io/badge/Docker-containerised-2496ed?logo=docker)
 ![Heroku](https://img.shields.io/badge/Deployed-Heroku-430098?logo=heroku)
 ![CI](https://github.com/iamvisheshsrivastava/geospatial/actions/workflows/ci.yml/badge.svg)
@@ -60,7 +60,7 @@ The autoencoder was trained with Forest as the normal class. An Industrial patch
 
 ## Training
 
-Training runs on Kaggle (free P100 GPU). The notebook `train_models.ipynb` handles everything — EuroSAT download, all three models, checkpoint upload to a Kaggle Dataset, and a CI trigger that redeploys to Heroku automatically.
+Training runs on Kaggle (free P100 GPU). The notebook `train_models.ipynb` handles everything — EuroSAT download, all three models, checkpoint upload to a Kaggle Dataset, and a CI trigger that redeploys to Heroku automatically. It pins `torch==2.3.1+cu118` specifically, not whatever's latest — the P100's sm_60 compute capability drops out of newer CUDA wheels, so anything past 2.3.x just hangs on `.cuda()`. The serving side (`requirements.txt`) isn't under that constraint and tracks current PyTorch.
 
 To retrain:
 1. Open `train_models.ipynb` in Kaggle, enable GPU
@@ -202,4 +202,4 @@ tests/                  pytest suite
 
 ## Key dependencies
 
-`torch` · `torchvision` · `fastapi` · `rasterio` · `laspy` · `scikit-learn` · `wandb` · `pytorch-grad-cam` · `pillow`
+`torch` · `torchvision` · `fastapi` · `rasterio` · `laspy` · `scikit-learn` · `wandb` · `grad-cam` (imports as `pytorch_grad_cam`) · `pillow`
