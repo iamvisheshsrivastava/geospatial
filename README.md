@@ -29,6 +29,26 @@ The classifier was trained on [EuroSAT](https://github.com/phelber/EuroSAT) (27,
 
 ---
 
+## Screenshots
+
+All three captured live against the deployed Heroku instance — real model inference, not mockups.
+
+**Swagger UI — all 8 endpoints** (`/docs`)
+
+![Swagger UI listing all 8 endpoints](docs/screenshots/swagger_docs.png)
+
+**`/predict` — land-cover classification on a Forest sample tile**
+
+![Prediction result: Forest class at 100% confidence, with the full per-class probability breakdown](docs/screenshots/predict_result.png)
+
+**`/explain` — GradCAM saliency map for the same prediction**
+
+Red = pixels that most influenced the "Forest" call; blue = low influence.
+
+![GradCAM heatmap overlay showing which regions of the forest tile drove the classifier's prediction](docs/screenshots/gradcam_result.png)
+
+---
+
 ## Research basis
 
 The `/anomaly` endpoint implements the methodology from my published paper:
