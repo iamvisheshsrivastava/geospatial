@@ -276,6 +276,14 @@ def process_las_file(path: Path, max_points: int | None = None) -> dict[str, Any
     Returns a JSON-serialisable dict ready for the /pointcloud API endpoint.
     """
     xyz_raw = read_las(path, max_points=max_points)
+    if len(xyz_raw) == 0:
+        # A LAS/LAZ file with a 0-point header is valid per the spec, but every
+        # downstream step assumes at least one point: `normalise_height`'s
+        # np.percentile raises IndexError on an empty array, and `compute_stats`'
+        # `canopy_mask.sum() / len(heights)` raises ZeroDivisionError. Both
+        # surface as an opaque "Point cloud processing failed: <cryptic error>"
+        # to the API caller instead of a message describing what's actually wrong.
+        raise ValueError("Point cloud is empty (0 points) — nothing to analyse.")
     xyz = normalise_height(xyz_raw)
     stats = compute_stats(xyz)
     trees = segment_trees(xyz)
