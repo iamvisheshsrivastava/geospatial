@@ -29,6 +29,8 @@ from torchvision.models.detection import (
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 
+from src.checkpoint import load_checkpoint
+
 
 def build_tree_segmentation_model(
     num_classes: int = 2,  # background + tree
@@ -132,12 +134,12 @@ def load_segmentation_model(checkpoint_path: Path, device: torch.device, num_cla
     immediately, keeping peak near the model size alone (~170 MB).
     """
     try:
-        ckpt = torch.load(
-            checkpoint_path, map_location=device, weights_only=False, mmap=True
+        ckpt = load_checkpoint(
+            checkpoint_path, map_location=device, mmap=True
         )
     except TypeError:
         # mmap parameter not available in this PyTorch build — fall back
-        ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        ckpt = load_checkpoint(checkpoint_path, map_location=device)
     state = ckpt.get("model_state_dict", ckpt)
 
     # Detect num_classes from the box predictor weight shape

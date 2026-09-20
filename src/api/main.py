@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from src.checkpoint import load_checkpoint
 from src.config import settings
 from src.data.preprocessing import assert_safe_image_pixels, preprocess_image
 from src.models.resnet import build_resnet50_classifier
@@ -34,6 +35,8 @@ class PredictionResponse(BaseModel):
     predicted_class: str
     confidence: float
     probabilities: dict[str, float]
+    low_confidence: bool = False
+    note: str = "Confidence is an uncalibrated softmax probability; it can be ~1.0 on out-of-distribution input."
 
 
 class AnomalyResponse(BaseModel):
@@ -177,7 +180,7 @@ def _ensure_file(local_path: Path, s3_key: str | None) -> Path:
 def load_classifier() -> None:
     global classifier, class_names
     path = _ensure_file(settings.model_path, settings.s3_model_key)
-    ckpt = torch.load(path, map_location=device, weights_only=False)
+    ckpt = load_checkpoint(path, map_location=device)
     class_names = ckpt["class_names"]
     model = build_resnet50_classifier(num_classes=len(class_names), pretrained=False)
     model.load_state_dict(ckpt["model_state_dict"])
@@ -382,6 +385,7 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
             predicted_class=class_names[int(predicted_index)],
             confidence=round(float(confidence), 4),
             probabilities={name: round(float(probs[i]), 4) for i, name in enumerate(class_names)},
+            low_confidence=float(confidence) < settings.min_confidence,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not process image: {exc}") from exc

@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     device: str = Field(default="cpu", alias="DEVICE")
 
     # Upload guards
+    min_confidence: float = Field(default=0.6, alias="MIN_CONFIDENCE")
     max_upload_mb: int = Field(default=25, alias="MAX_UPLOAD_MB")
     max_pointcloud_points: int = Field(default=5_000_000, alias="MAX_POINTCLOUD_POINTS")
 

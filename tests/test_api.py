@@ -26,3 +26,22 @@ def test_health_includes_model_metadata() -> None:
     assert "anomaly_detector_loaded" in payload
     assert "model_path" in payload
     assert "classes" in payload
+
+
+def test_predict_rejects_oversized_upload(monkeypatch) -> None:
+    from src.api import main
+
+    monkeypatch.setattr(main.settings, "max_upload_mb", 1)
+    monkeypatch.setattr(main, "classifier", object())
+    client = TestClient(app)
+    response = client.post("/predict", files={"file": ("x.png", b"0" * (2 * 1024 * 1024))})
+    assert response.status_code == 413
+
+
+def test_predict_rejects_garbage_bytes(monkeypatch) -> None:
+    from src.api import main
+
+    monkeypatch.setattr(main, "classifier", object())
+    client = TestClient(app)
+    response = client.post("/predict", files={"file": ("x.png", b"not an image")})
+    assert response.status_code == 400

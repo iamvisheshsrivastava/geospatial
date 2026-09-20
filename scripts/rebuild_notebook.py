@@ -1,4 +1,8 @@
-"""Rebuild train_models.ipynb — Kaggle-ready training notebook."""
+"""DEPRECATED / STALE: train_models.ipynb is now hand-maintained and this generator
+has drifted from it (e.g. it lacks the GitHub CI-trigger step). Do not run it
+to overwrite the notebook. See issue #24.
+"""
+raise SystemExit("scripts/rebuild_notebook.py is retired; edit train_models.ipynb directly.")
 import json
 from pathlib import Path
 

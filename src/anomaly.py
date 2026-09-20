@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import transforms
 import wandb
 
+from src.checkpoint import load_checkpoint
 from src.config import settings
 from src.data.preprocessing import assert_safe_image_pixels
 from src.models.autoencoder import ARCHITECTURES, _BaseAutoencoder, build_autoencoder
@@ -344,7 +345,7 @@ def load_autoencoder(
     checkpoint_path: Path, device: torch.device
 ) -> tuple[_BaseAutoencoder, int, float]:
     """Returns (model, image_size, threshold)."""
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    ckpt = load_checkpoint(checkpoint_path, map_location=device)
     arch = ckpt.get("arch", "CAE-3Conv")
     image_size = ckpt.get("image_size", 64)
     threshold = ckpt.get("threshold", 0.05)  # sensible default if checkpoint is old

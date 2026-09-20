@@ -11,6 +11,7 @@ from sklearn.metrics import ConfusionMatrixDisplay
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from src.checkpoint import load_checkpoint
 from src.config import settings
 from src.data.dataset import create_datasets
 from src.metrics import classification_metrics, confusion_matrix_counts
@@ -37,7 +38,7 @@ def main() -> None:
         image_size=args.image_size,
         seed=args.seed,
     )
-    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    checkpoint = load_checkpoint(args.checkpoint, map_location=device)
     class_names = checkpoint.get("class_names", discovered_class_names)
 
     model = build_resnet50_classifier(num_classes=len(class_names), pretrained=False)
