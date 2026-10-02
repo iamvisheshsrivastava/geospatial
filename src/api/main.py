@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import collections
+import time
 from contextlib import asynccontextmanager
 import os
 import tempfile
@@ -14,8 +17,8 @@ from typing import AsyncIterator
 _HEROKU = bool(os.getenv("DYNO"))
 
 import torch
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -160,6 +163,24 @@ class_names: list[str] = []
 autoencoder_image_size: int = settings.image_size
 autoencoder_threshold: float = _DEFAULT_ANOMALY_THRESHOLD
 device = torch.device(settings.device)
+
+# Serializes access to the classifier / autoencoder / segmentation_model globals.
+# /segment swaps the lightweight models out (sets them to None) to free RAM
+# before loading Mask R-CNN, then reloads them afterwards. Without this lock,
+# a concurrent /predict or /anomaly request can observe a None model between
+# its own null-check and its use of the global (see issue #31).
+_model_lock = asyncio.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting — simple in-memory, per-client-IP sliding window (60s)
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_WINDOW_SECONDS = 60.0
+# Endpoints considered "heavy" (expensive on the memory-constrained free-tier
+# deployment) get a lower per-minute cap than the lighter inference endpoints.
+_HEAVY_RATE_LIMIT_PATHS = {"/segment", "/pointcloud", "/change-detect"}
+_rate_limit_buckets: dict[tuple[str, str], collections.deque[float]] = collections.defaultdict(collections.deque)
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +366,45 @@ def _host_available_mb() -> float:
     return 0.0
 
 
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Best-effort per-client-IP rate limiter (sliding 60s window, in-memory).
+
+    Not distributed and resets on process restart — adequate for a single-
+    worker deployment (see issue #32). Heavy endpoints get a lower cap.
+    """
+    if not settings.rate_limit_enabled:
+        return await call_next(request)
+
+    path = request.url.path
+    if path not in _HEAVY_RATE_LIMIT_PATHS and path not in (
+        "/predict", "/anomaly", "/explain", "/spectral", "/poverty-proxy",
+    ):
+        return await call_next(request)
+
+    limit = (
+        settings.rate_limit_heavy_per_minute
+        if path in _HEAVY_RATE_LIMIT_PATHS
+        else settings.rate_limit_light_per_minute
+    )
+    client_ip = request.client.host if request.client else "unknown"
+    key = (client_ip, path)
+    now = time.monotonic()
+    bucket = _rate_limit_buckets[key]
+    while bucket and now - bucket[0] > _RATE_LIMIT_WINDOW_SECONDS:
+        bucket.popleft()
+
+    if len(bucket) >= limit:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded ({limit} requests/minute for {path}). Try again later."},
+            headers={"Retry-After": str(int(_RATE_LIMIT_WINDOW_SECONDS))},
+        )
+
+    bucket.append(now)
+    return await call_next(request)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -371,22 +431,28 @@ def health() -> HealthResponse:
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(file: UploadFile = File(...)) -> PredictionResponse:
-    if classifier is None:
-        raise HTTPException(status_code=503, detail="Classifier not loaded.")
     content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
-        tensor = preprocess_image(tmp_path, settings.image_size).unsqueeze(0).to(device)
-        with torch.inference_mode():
-            logits = classifier(tensor)
-            probs = torch.softmax(logits, dim=1).squeeze(0).cpu()
-        confidence, predicted_index = torch.max(probs, dim=0)
-        return PredictionResponse(
-            predicted_class=class_names[int(predicted_index)],
-            confidence=round(float(confidence), 4),
-            probabilities={name: round(float(probs[i]), 4) for i, name in enumerate(class_names)},
-            low_confidence=float(confidence) < settings.min_confidence,
-        )
+        # Hold the model lock across the null-check + inference span so a
+        # concurrent /segment call cannot null out `classifier` in between
+        # (see issue #31).
+        async with _model_lock:
+            if classifier is None:
+                raise HTTPException(status_code=503, detail="Classifier not loaded.")
+            tensor = preprocess_image(tmp_path, settings.image_size).unsqueeze(0).to(device)
+            with torch.inference_mode():
+                logits = classifier(tensor)
+                probs = torch.softmax(logits, dim=1).squeeze(0).cpu()
+            confidence, predicted_index = torch.max(probs, dim=0)
+            return PredictionResponse(
+                predicted_class=class_names[int(predicted_index)],
+                confidence=round(float(confidence), 4),
+                probabilities={name: round(float(probs[i]), 4) for i, name in enumerate(class_names)},
+                low_confidence=float(confidence) < settings.min_confidence,
+            )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not process image: {exc}") from exc
     finally:
@@ -403,20 +469,25 @@ async def anomaly_detect(
     Uses an unsupervised convolutional autoencoder trained on normal land patches.
     High reconstruction error = the patch deviates from the learned normal distribution.
     """
-    if autoencoder is None:
-        raise HTTPException(status_code=503, detail="Anomaly detector not loaded.")
     content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
-        from src.anomaly import compute_anomaly_score
-        effective_threshold = threshold if threshold is not None else autoencoder_threshold
-        result = compute_anomaly_score(autoencoder, tmp_path, autoencoder_image_size, device, effective_threshold)
-        return AnomalyResponse(
-            anomaly_score=result["anomaly_score"],
-            is_anomaly=result["is_anomaly"],
-            threshold=result["threshold"],
-            heatmap=result["heatmap"],
-        )
+        # See /predict — lock held across the null-check + inference span to
+        # avoid racing with /segment's model swap (issue #31).
+        async with _model_lock:
+            if autoencoder is None:
+                raise HTTPException(status_code=503, detail="Anomaly detector not loaded.")
+            from src.anomaly import compute_anomaly_score
+            effective_threshold = threshold if threshold is not None else autoencoder_threshold
+            result = compute_anomaly_score(autoencoder, tmp_path, autoencoder_image_size, device, effective_threshold)
+            return AnomalyResponse(
+                anomaly_score=result["anomaly_score"],
+                is_anomaly=result["is_anomaly"],
+                threshold=result["threshold"],
+                heatmap=result["heatmap"],
+            )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Anomaly detection failed: {exc}") from exc
     finally:
@@ -494,107 +565,113 @@ async def segment(
         )
     # ─────────────────────────────────────────────────────────────────────────
 
-    # Lazy-load segmentation model on first request.
-    if segmentation_model is None:
-        # Free the lightweight models first to make room for Mask R-CNN.
-        global classifier, autoencoder
-        classifier = None
-        autoencoder = None
-        try:
-            from src.change_detection import unload_encoder as _unload_cd
-            _unload_cd()
-        except Exception:
-            pass
-        gc.collect()
+    # Everything below mutates (or depends on) the shared classifier /
+    # autoencoder / segmentation_model globals — hold the model lock for the
+    # whole load/infer/unload/reload cycle so a concurrent /predict,
+    # /anomaly, or another /segment call cannot observe half-swapped state
+    # (see issue #31).
+    global classifier, autoencoder
+    async with _model_lock:
+        # Lazy-load segmentation model on first request.
+        if segmentation_model is None:
+            # Free the lightweight models first to make room for Mask R-CNN.
+            classifier = None
+            autoencoder = None
+            try:
+                from src.change_detection import unload_encoder as _unload_cd
+                _unload_cd()
+            except Exception:
+                pass
+            gc.collect()
 
-        # ── Pre-flight memory guard ──────────────────────────────────────────
-        # Loading Mask R-CNN needs ~180 MB peak (mmap-assisted) + ~15 MB for
-        # inference activations at the reduced 256 px transform.
-        # If available memory is below our safety threshold, return a graceful
-        # 503 rather than letting the OS OOM-kill the container. Available
-        # memory is computed from the container's cgroup limit (Docker/
-        # Railway/Heroku/k8s all use cgroups) since /proc/meminfo reports the
-        # *host's* memory, not the container's, and never reflects the
-        # cgroup cap under any of these runtimes.
-        _avail_mb: float | None = _cgroup_available_mb()
-        if _avail_mb is None:
-            _avail_mb = _host_available_mb()  # not containerized — fall back to host check
+            # ── Pre-flight memory guard ──────────────────────────────────────────
+            # Loading Mask R-CNN needs ~180 MB peak (mmap-assisted) + ~15 MB for
+            # inference activations at the reduced 256 px transform.
+            # If available memory is below our safety threshold, return a graceful
+            # 503 rather than letting the OS OOM-kill the container. Available
+            # memory is computed from the container's cgroup limit (Docker/
+            # Railway/Heroku/k8s all use cgroups) since /proc/meminfo reports the
+            # *host's* memory, not the container's, and never reflects the
+            # cgroup cap under any of these runtimes.
+            _avail_mb: float | None = _cgroup_available_mb()
+            if _avail_mb is None:
+                _avail_mb = _host_available_mb()  # not containerized — fall back to host check
 
-        if 0 < _avail_mb < 200:
-            try: load_classifier()
-            except Exception: pass
-            try: load_anomaly_detector()
-            except Exception: pass
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"Not enough RAM for Mask R-CNN ({_avail_mb:.0f} MB available, "
-                    "~200 MB needed). Free-tier limit reached. "
-                    "Run locally with `docker compose up` for full segmentation."
-                ),
-            )
-        # ────────────────────────────────────────────────────────────────────
-
-        load_ok = False
-        load_err: Exception | None = None
-        try:
-            load_segmentation()
-            load_ok = True
-        except FileNotFoundError as exc:
-            load_err = exc
-        except (MemoryError, RuntimeError) as exc:
-            try: load_classifier()
-            except Exception: pass
-            try: load_anomaly_detector()
-            except Exception: pass
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Segmentation requires ~200 MB RAM. Not enough memory available. "
-                    "Run locally with `docker compose up` for full functionality."
+            if 0 < _avail_mb < 200:
+                try: load_classifier()
+                except Exception: pass
+                try: load_anomaly_detector()
+                except Exception: pass
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"Not enough RAM for Mask R-CNN ({_avail_mb:.0f} MB available, "
+                        "~200 MB needed). Free-tier limit reached. "
+                        "Run locally with `docker compose up` for full segmentation."
+                    ),
                 )
-            ) from exc
+            # ────────────────────────────────────────────────────────────────────
 
-        if not load_ok:
-            # Restore lightweight models before returning error
+            load_ok = False
+            load_err: Exception | None = None
+            try:
+                load_segmentation()
+                load_ok = True
+            except FileNotFoundError as exc:
+                load_err = exc
+            except (MemoryError, RuntimeError) as exc:
+                try: load_classifier()
+                except Exception: pass
+                try: load_anomaly_detector()
+                except Exception: pass
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Segmentation requires ~200 MB RAM. Not enough memory available. "
+                        "Run locally with `docker compose up` for full functionality."
+                    )
+                ) from exc
+
+            if not load_ok:
+                # Restore lightweight models before returning error
+                try: load_classifier()
+                except Exception: pass
+                try: load_anomaly_detector()
+                except Exception: pass
+                raise HTTPException(
+                    status_code=503,
+                    detail="Segmentation model checkpoint not found. Train the model first (see README)."
+                )
+
+        content = await _read_upload_capped(file)
+        tmp_path = _save_upload(file, content)
+        try:
+            from PIL import Image
+            import torchvision.transforms.functional as TF
+            pil = Image.open(tmp_path)
+            assert_safe_image_pixels(*pil.size)
+            pil = pil.convert("RGB")
+            img_tensor = TF.to_tensor(pil).to(device)
+
+            from src.models.segmentation import run_segmentation
+            with torch.inference_mode():
+                result = run_segmentation(segmentation_model, img_tensor, confidence_threshold)
+            return SegmentationResponse(**result)
+        except (MemoryError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Out of memory during inference. Upgrade to a plan with ≥1 GB RAM."
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Segmentation failed: {exc}") from exc
+        finally:
+            tmp_path.unlink(missing_ok=True)
+            unload_segmentation()
+            gc.collect()
             try: load_classifier()
             except Exception: pass
             try: load_anomaly_detector()
             except Exception: pass
-            raise HTTPException(
-                status_code=503,
-                detail="Segmentation model checkpoint not found. Train the model first (see README)."
-            )
-
-    content = await _read_upload_capped(file)
-    tmp_path = _save_upload(file, content)
-    try:
-        from PIL import Image
-        import torchvision.transforms.functional as TF
-        pil = Image.open(tmp_path)
-        assert_safe_image_pixels(*pil.size)
-        pil = pil.convert("RGB")
-        img_tensor = TF.to_tensor(pil).to(device)
-
-        from src.models.segmentation import run_segmentation
-        with torch.inference_mode():
-            result = run_segmentation(segmentation_model, img_tensor, confidence_threshold)
-        return SegmentationResponse(**result)
-    except (MemoryError, RuntimeError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Out of memory during inference. Upgrade to a plan with ≥1 GB RAM."
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Segmentation failed: {exc}") from exc
-    finally:
-        tmp_path.unlink(missing_ok=True)
-        unload_segmentation()
-        gc.collect()
-        try: load_classifier()
-        except Exception: pass
-        try: load_anomaly_detector()
-        except Exception: pass
 
 
 @app.post("/pointcloud", response_model=PointCloudResponse)

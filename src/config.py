@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=25, alias="MAX_UPLOAD_MB")
     max_pointcloud_points: int = Field(default=5_000_000, alias="MAX_POINTCLOUD_POINTS")
 
+    # Rate limiting (per-client-IP, sliding 60s window). Heavy endpoints
+    # (/segment, /pointcloud, /change-detect) get a lower cap since they are
+    # the most memory/CPU expensive on the constrained free-tier deployment.
+    rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
+    rate_limit_light_per_minute: int = Field(default=60, alias="RATE_LIMIT_LIGHT_PER_MINUTE")
+    rate_limit_heavy_per_minute: int = Field(default=10, alias="RATE_LIMIT_HEAVY_PER_MINUTE")
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
 
