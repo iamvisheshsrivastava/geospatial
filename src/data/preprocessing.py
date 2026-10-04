@@ -26,18 +26,24 @@ _PIL_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 MAX_IMAGE_PIXELS = 50_000_000
 
 
-def assert_safe_image_pixels(width: int, height: int) -> None:
-    """Raise ValueError if width*height exceeds MAX_IMAGE_PIXELS.
+def assert_safe_image_pixels(width: int, height: int, bands: int = 1) -> None:
+    """Raise ValueError if width*height*bands exceeds MAX_IMAGE_PIXELS.
 
     Call this right after the image header is read (PIL's `Image.open` reads
     only the header lazily; rasterio's `.width`/`.height` likewise don't
     trigger a full decode) — i.e. before `.convert()`, `.resize()`, or
     `.read()` decode the full pixel buffer.
+
+    `bands` lets callers that will decode every band (rather than slicing to
+    the first 3) scale the effective pixel budget accordingly, so a
+    multi-band GeoTIFF under the width*height cap can't still balloon far
+    past it once every band is read into memory.
     """
-    pixels = int(width) * int(height)
+    pixels = int(width) * int(height) * max(1, int(bands))
     if pixels > MAX_IMAGE_PIXELS:
         raise ValueError(
-            f"Image is {width}x{height} ({pixels:,} px), which exceeds the "
+            f"Image is {width}x{height} with {bands} band(s) "
+            f"({pixels:,} effective px), which exceeds the "
             f"{MAX_IMAGE_PIXELS:,} px limit."
         )
 
@@ -59,8 +65,11 @@ def read_geospatial_rgb(path: Path) -> np.ndarray:
 
     if _HAS_RASTERIO:
         with rasterio.open(path) as src:
-            assert_safe_image_pixels(src.width, src.height)
-            data = src.read()  # (bands, H, W)
+            assert_safe_image_pixels(src.width, src.height, bands=src.count)
+            # Only decode the first 3 bands (what we actually use below) so a
+            # high band-count GeoTIFF doesn't allocate bands x H x W in memory.
+            n_bands = min(3, src.count)
+            data = src.read(indexes=list(range(1, n_bands + 1)))  # (bands, H, W)
     else:
         from PIL import Image
         img = Image.open(path)

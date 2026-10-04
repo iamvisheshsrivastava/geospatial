@@ -55,7 +55,9 @@ def preprocess_for_autoencoder(path: Path, image_size: int = 64) -> torch.Tensor
         try:
             import rasterio
             with rasterio.open(path) as src:
-                data = src.read()[:3]  # first 3 bands
+                assert_safe_image_pixels(src.width, src.height, bands=src.count)
+                n_bands = min(3, src.count)
+                data = src.read(indexes=list(range(1, n_bands + 1)))  # first 3 bands
             max_val = float(np.iinfo(data.dtype).max) if np.issubdtype(data.dtype, np.integer) else 1.0
             arr = (data.astype(np.float32) / max_val).clip(0, 1)
             pil = Image.fromarray((arr.transpose(1, 2, 0) * 255).astype(np.uint8))
@@ -88,7 +90,9 @@ class AnomalyDataset(Dataset[torch.Tensor]):
             try:
                 import rasterio
                 with rasterio.open(self.paths[idx]) as src:
-                    data = src.read()[:3]
+                    assert_safe_image_pixels(src.width, src.height, bands=src.count)
+                    n_bands = min(3, src.count)
+                    data = src.read(indexes=list(range(1, n_bands + 1)))
                 max_val = float(np.iinfo(data.dtype).max) if np.issubdtype(data.dtype, np.integer) else 1.0
                 arr = (data.astype(np.float32) / max_val).clip(0, 1)
                 pil = Image.fromarray((arr.transpose(1, 2, 0) * 255).astype(np.uint8))
