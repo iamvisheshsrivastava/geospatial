@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     min_confidence: float = Field(default=0.6, alias="MIN_CONFIDENCE")
     max_upload_mb: int = Field(default=25, alias="MAX_UPLOAD_MB")
     max_pointcloud_points: int = Field(default=5_000_000, alias="MAX_POINTCLOUD_POINTS")
+    # /predict/batch — caps how many images one request can score in a single
+    # batched forward pass, protecting the same memory-constrained deployment
+    # the /segment guards already account for.
+    max_batch_size: int = Field(default=16, alias="MAX_BATCH_SIZE")
 
     # Rate limiting (per-client-IP, sliding 60s window). Heavy endpoints
     # (/segment, /pointcloud, /change-detect) get a lower cap since they are

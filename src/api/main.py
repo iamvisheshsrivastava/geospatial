@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import hashlib
 import time
+import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field as dc_field
 import os
 import tempfile
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Awaitable, Callable
 
 # Heroku always injects the DYNO env var (e.g. "web.1").
 # On any other host (local Docker, Railway, etc.) it is absent.
@@ -17,7 +20,7 @@ from typing import AsyncIterator
 _HEROKU = bool(os.getenv("DYNO"))
 
 import torch
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,6 +28,7 @@ from pydantic import BaseModel
 from src.checkpoint import load_checkpoint
 from src.config import settings
 from src.data.preprocessing import assert_safe_image_pixels, preprocess_image
+from src.metrics import predictive_entropy
 from src.models.resnet import build_resnet50_classifier
 from src.models.autoencoder import SatelliteAutoencoder
 from src.storage.s3 import download_file_from_s3
@@ -38,8 +42,41 @@ class PredictionResponse(BaseModel):
     predicted_class: str
     confidence: float
     probabilities: dict[str, float]
+    entropy: float = 0.0
     low_confidence: bool = False
-    note: str = "Confidence is an uncalibrated softmax probability; it can be ~1.0 on out-of-distribution input."
+    likely_ood: bool = False
+    note: str = (
+        "Confidence is an uncalibrated softmax probability; it can be ~1.0 on "
+        "out-of-distribution input even when entropy is low (see issue #17) — "
+        "entropy alone cannot catch that failure mode. `likely_ood` additionally "
+        "cross-checks the autoencoder's reconstruction error (when the anomaly "
+        "detector is loaded) as a plausibility gate before trusting this prediction."
+    )
+
+
+class BatchPredictionResponse(BaseModel):
+    results: list[PredictionResponse]
+    failed: list[dict]
+
+
+class ModelMetadataResponse(BaseModel):
+    name: str
+    loaded: bool
+    checkpoint_path: str
+    checkpoint_sha256: str | None = None
+    metadata: dict = {}
+
+
+class JobAccepted(BaseModel):
+    job_id: str
+    status: str = "pending"
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str  # pending | done | error
+    result: dict | None = None
+    error: str | None = None
 
 
 class AnomalyResponse(BaseModel):
@@ -164,6 +201,26 @@ autoencoder_image_size: int = settings.image_size
 autoencoder_threshold: float = _DEFAULT_ANOMALY_THRESHOLD
 device = torch.device(settings.device)
 
+# Checkpoint metadata captured at load time for GET /models (issue #29).
+# Kept separate from the model objects themselves so segmentation's metadata
+# survives the lazy unload that happens after every /segment request.
+classifier_metadata: dict = {}
+autoencoder_metadata: dict = {}
+segmentation_metadata: dict = {}
+
+# In-memory async job store for /segment/async and /pointcloud/async
+# (issue #30). Not distributed and resets on process restart — same
+# single-worker caveat as the rate limiter (issue #32).
+@dataclass
+class JobRecord:
+    status: str = "pending"  # pending | done | error
+    result: dict | None = None
+    error: str | None = None
+    created_at: float = dc_field(default_factory=time.time)
+
+
+_jobs: dict[str, JobRecord] = {}
+
 # Serializes access to the classifier / autoencoder / segmentation_model globals.
 # /segment swaps the lightweight models out (sets them to None) to free RAM
 # before loading Mask R-CNN, then reloads them afterwards. Without this lock,
@@ -198,8 +255,39 @@ def _ensure_file(local_path: Path, s3_key: str | None) -> Path:
     )
 
 
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _checkpoint_metadata(path: Path, ckpt: dict, extra: dict | None = None) -> dict:
+    """Build a GET /models metadata entry for a loaded checkpoint (issue #29).
+
+    Prefers an explicit `ckpt["metadata"]` dict (trained_at, val_f1, val_auc,
+    architecture, epochs, git_sha — written by newer training runs) and falls
+    back to whatever top-level fields an older checkpoint already carries
+    (`metrics`, `config`, `arch`, `auc_roc`, `threshold`, ...), so this stays
+    backward compatible with checkpoints saved before this field existed.
+    """
+    meta: dict = dict(ckpt.get("metadata", {})) if isinstance(ckpt.get("metadata"), dict) else {}
+    for key in ("metrics", "config", "arch", "auc_roc", "threshold", "threshold_percentile", "normal_classes", "image_size", "class_names"):
+        if key not in meta and key in ckpt:
+            meta[key] = ckpt[key]
+    if extra:
+        meta.update(extra)
+    try:
+        meta["checkpoint_sha256"] = _sha256_file(path)
+    except OSError:
+        meta["checkpoint_sha256"] = None
+    meta["checkpoint_filename"] = path.name
+    return meta
+
+
 def load_classifier() -> None:
-    global classifier, class_names
+    global classifier, class_names, classifier_metadata
     path = _ensure_file(settings.model_path, settings.s3_model_key)
     ckpt = load_checkpoint(path, map_location=device)
     class_names = ckpt["class_names"]
@@ -207,13 +295,16 @@ def load_classifier() -> None:
     model.load_state_dict(ckpt["model_state_dict"])
     model.to(device).eval()
     classifier = model
+    classifier_metadata = _checkpoint_metadata(path, ckpt, extra={"architecture": "resnet50", "num_classes": len(class_names)})
 
 
 def load_anomaly_detector() -> None:
-    global autoencoder, autoencoder_image_size, autoencoder_threshold
+    global autoencoder, autoencoder_image_size, autoencoder_threshold, autoencoder_metadata
     from src.anomaly import load_autoencoder
     path = _ensure_file(settings.autoencoder_path, settings.s3_autoencoder_key)
+    ckpt = load_checkpoint(path, map_location=device)
     autoencoder, autoencoder_image_size, autoencoder_threshold = load_autoencoder(path, device)
+    autoencoder_metadata = _checkpoint_metadata(path, ckpt, extra={"image_size": autoencoder_image_size, "threshold": autoencoder_threshold})
 
 
 def load_segmentation() -> None:
@@ -225,7 +316,7 @@ def load_segmentation() -> None:
     the standard 800×1333 transform produces.  Detection quality is reduced, but
     the endpoint stays alive on a 512 MB Heroku dyno.
     """
-    global segmentation_model
+    global segmentation_model, segmentation_metadata
     from src.models.segmentation import load_segmentation_model
     path = _ensure_file(settings.segmentation_path, settings.s3_segmentation_key)
     model = load_segmentation_model(path, device)
@@ -236,6 +327,12 @@ def load_segmentation() -> None:
         model.transform.min_size = (256,)
         model.transform.max_size = 320
     segmentation_model = model
+    try:
+        ckpt = load_checkpoint(path, map_location=device)
+        ckpt_dict = ckpt if isinstance(ckpt, dict) else {}
+    except Exception:
+        ckpt_dict = {}
+    segmentation_metadata = _checkpoint_metadata(path, ckpt_dict, extra={"architecture": "maskrcnn_resnet50_fpn"})
 
 
 def unload_segmentation() -> None:
@@ -429,6 +526,44 @@ def health() -> HealthResponse:
     )
 
 
+@app.get("/models", response_model=list[ModelMetadataResponse])
+def list_models() -> list[ModelMetadataResponse]:
+    """Report per-model checkpoint metadata (issue #29).
+
+    Separate from `GET /health`, which only reports load status. This reads
+    whatever `checkpoint["metadata"]` (or legacy top-level fields) each
+    checkpoint carries, plus a SHA256 of the checkpoint file for
+    reproducibility/debugging — e.g. to confirm which model version is
+    actually deployed behind `/predict`'s `confidence`.
+    """
+    return [
+        ModelMetadataResponse(
+            name="classifier",
+            loaded=classifier is not None,
+            checkpoint_path=str(settings.model_path),
+            checkpoint_sha256=classifier_metadata.get("checkpoint_sha256"),
+            metadata=classifier_metadata,
+        ),
+        ModelMetadataResponse(
+            name="anomaly_detector",
+            loaded=autoencoder is not None,
+            checkpoint_path=str(settings.autoencoder_path),
+            checkpoint_sha256=autoencoder_metadata.get("checkpoint_sha256"),
+            metadata=autoencoder_metadata,
+        ),
+        ModelMetadataResponse(
+            name="segmentation",
+            # Lazily loaded/unloaded per request (see /segment) — reflects
+            # whether Mask R-CNN is *currently* resident in memory, which is
+            # normally False between requests even when a checkpoint exists.
+            loaded=segmentation_model is not None,
+            checkpoint_path=str(settings.segmentation_path),
+            checkpoint_sha256=segmentation_metadata.get("checkpoint_sha256"),
+            metadata=segmentation_metadata,
+        ),
+    ]
+
+
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(file: UploadFile = File(...)) -> PredictionResponse:
     content = await _read_upload_capped(file)
@@ -445,11 +580,33 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
                 logits = classifier(tensor)
                 probs = torch.softmax(logits, dim=1).squeeze(0).cpu()
             confidence, predicted_index = torch.max(probs, dim=0)
+            low_confidence = float(confidence) < settings.min_confidence
+
+            # OOD plausibility gate (issue #17): a classically overconfident
+            # OOD input (noise, solid colour) has a high max-softmax AND low
+            # entropy, so neither alone flags it. Cross-check against the
+            # autoencoder's reconstruction error (already used for /anomaly,
+            # trained on in-distribution land-cover patches) when it's loaded.
+            # A failure here never fails the prediction — it's a best-effort
+            # plausibility signal, not a hard requirement.
+            likely_ood = low_confidence
+            if autoencoder is not None:
+                try:
+                    from src.anomaly import compute_anomaly_score
+                    ae_result = compute_anomaly_score(
+                        autoencoder, tmp_path, autoencoder_image_size, device, autoencoder_threshold
+                    )
+                    likely_ood = likely_ood or bool(ae_result.get("is_anomaly", False))
+                except Exception:
+                    pass
+
             return PredictionResponse(
                 predicted_class=class_names[int(predicted_index)],
                 confidence=round(float(confidence), 4),
                 probabilities={name: round(float(probs[i]), 4) for i, name in enumerate(class_names)},
-                low_confidence=float(confidence) < settings.min_confidence,
+                entropy=round(predictive_entropy(probs.tolist()), 4),
+                low_confidence=low_confidence,
+                likely_ood=likely_ood,
             )
     except HTTPException:
         raise
@@ -457,6 +614,69 @@ async def predict(file: UploadFile = File(...)) -> PredictionResponse:
         raise HTTPException(status_code=400, detail=f"Could not process image: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+@app.post("/predict/batch", response_model=BatchPredictionResponse)
+async def predict_batch(files: list[UploadFile] = File(...)) -> BatchPredictionResponse:
+    """Classify multiple images in a single batched forward pass (issue #28).
+
+    One bad image fails into `failed` (with its filename and error) rather
+    than 400-ing the whole batch. Capped at `settings.max_batch_size` to
+    protect the same memory-constrained deployment the /segment guards
+    already account for.
+    """
+    if len(files) > settings.max_batch_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Batch of {len(files)} exceeds the {settings.max_batch_size}-image limit.",
+        )
+
+    async with _model_lock:
+        if classifier is None:
+            raise HTTPException(status_code=503, detail="Classifier not loaded.")
+
+        tmp_paths: list[Path] = []
+        tensors: list[torch.Tensor] = []
+        valid_filenames: list[str] = []
+        failed: list[dict] = []
+
+        try:
+            for f in files:
+                name = f.filename or "upload"
+                try:
+                    content = await _read_upload_capped(f)
+                    tmp_path = _save_upload(f, content)
+                    tmp_paths.append(tmp_path)
+                    tensors.append(preprocess_image(tmp_path, settings.image_size))
+                    valid_filenames.append(name)
+                except HTTPException as exc:
+                    failed.append({"filename": name, "error": str(exc.detail)})
+                except Exception as exc:
+                    failed.append({"filename": name, "error": str(exc)})
+
+            results: list[PredictionResponse] = []
+            if tensors:
+                batch = torch.stack(tensors).to(device)
+                with torch.inference_mode():
+                    logits = classifier(batch)
+                    probs = torch.softmax(logits, dim=1).cpu()
+                for i in range(probs.shape[0]):
+                    p = probs[i]
+                    confidence, predicted_index = torch.max(p, dim=0)
+                    results.append(
+                        PredictionResponse(
+                            predicted_class=class_names[int(predicted_index)],
+                            confidence=round(float(confidence), 4),
+                            probabilities={cn: round(float(p[j]), 4) for j, cn in enumerate(class_names)},
+                            entropy=round(predictive_entropy(p.tolist()), 4),
+                            low_confidence=float(confidence) < settings.min_confidence,
+                        )
+                    )
+
+            return BatchPredictionResponse(results=results, failed=failed)
+        finally:
+            for p in tmp_paths:
+                p.unlink(missing_ok=True)
 
 
 @app.post("/anomaly", response_model=AnomalyResponse)
@@ -532,19 +752,15 @@ async def change_detect(
             _p.unlink(missing_ok=True)
 
 
-@app.post("/segment", response_model=SegmentationResponse)
-async def segment(
-    file: UploadFile = File(...),
-    confidence_threshold: float = 0.5,
-) -> SegmentationResponse:
-    """Detect and segment individual tree crowns in aerial or satellite RGB imagery.
+async def _segment_infer(tmp_path: Path, confidence_threshold: float) -> dict:
+    """Core Mask R-CNN segmentation pipeline.
 
-    Uses a Mask R-CNN (ResNet-50 + FPN) model. Returns per-tree bounding boxes,
-    confidence scores, and mask areas. Designed for forestry inventory workflows.
-
-    The model is loaded lazily on first call and unloaded after inference to
-    conserve memory on constrained deployment environments.
-    The lightweight classifier and autoencoder are temporarily freed to make room.
+    Shared by the synchronous `/segment` endpoint and the `/segment/async`
+    job runner (issue #30) so the memory-guard / lazy-load / model-swap
+    dance (issue #31) is implemented exactly once. Raises HTTPException on
+    any guard/load/inference failure; callers decide how to surface it
+    (directly, for the sync endpoint; into a JobRecord.error, for the async
+    one). Does NOT delete `tmp_path` — the caller owns its lifecycle.
     """
     import gc
 
@@ -613,12 +829,11 @@ async def segment(
             # ────────────────────────────────────────────────────────────────────
 
             load_ok = False
-            load_err: Exception | None = None
             try:
                 load_segmentation()
                 load_ok = True
-            except FileNotFoundError as exc:
-                load_err = exc
+            except FileNotFoundError:
+                pass
             except (MemoryError, RuntimeError) as exc:
                 try: load_classifier()
                 except Exception: pass
@@ -643,8 +858,6 @@ async def segment(
                     detail="Segmentation model checkpoint not found. Train the model first (see README)."
                 )
 
-        content = await _read_upload_capped(file)
-        tmp_path = _save_upload(file, content)
         try:
             from PIL import Image
             import torchvision.transforms.functional as TF
@@ -655,8 +868,7 @@ async def segment(
 
             from src.models.segmentation import run_segmentation
             with torch.inference_mode():
-                result = run_segmentation(segmentation_model, img_tensor, confidence_threshold)
-            return SegmentationResponse(**result)
+                return run_segmentation(segmentation_model, img_tensor, confidence_threshold)
         except (MemoryError, RuntimeError) as exc:
             raise HTTPException(
                 status_code=503,
@@ -665,13 +877,51 @@ async def segment(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Segmentation failed: {exc}") from exc
         finally:
-            tmp_path.unlink(missing_ok=True)
             unload_segmentation()
             gc.collect()
             try: load_classifier()
             except Exception: pass
             try: load_anomaly_detector()
             except Exception: pass
+
+
+@app.post("/segment", response_model=SegmentationResponse)
+async def segment(
+    file: UploadFile = File(...),
+    confidence_threshold: float = 0.5,
+) -> SegmentationResponse:
+    """Detect and segment individual tree crowns in aerial or satellite RGB imagery.
+
+    Uses a Mask R-CNN (ResNet-50 + FPN) model. Returns per-tree bounding boxes,
+    confidence scores, and mask areas. Designed for forestry inventory workflows.
+
+    The model is loaded lazily on first call and unloaded after inference to
+    conserve memory on constrained deployment environments.
+    The lightweight classifier and autoencoder are temporarily freed to make room.
+
+    This holds the HTTP connection open for the whole load/infer cycle. For a
+    slow proxy-timeout-prone deployment, use `POST /segment/async` instead
+    (issue #30), which returns a `job_id` immediately and is polled via
+    `GET /jobs/{job_id}`.
+    """
+    content = await _read_upload_capped(file)
+    tmp_path = _save_upload(file, content)
+    try:
+        result = await _segment_infer(tmp_path, confidence_threshold)
+        return SegmentationResponse(**result)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+async def _pointcloud_infer(tmp_path: Path) -> dict:
+    """Core LiDAR CHM + ITS pipeline, shared by `/pointcloud` and `/pointcloud/async`."""
+    try:
+        from src.pointcloud import process_las_file
+        return process_las_file(tmp_path, max_points=settings.max_pointcloud_points)
+    except ImportError as exc:
+        raise HTTPException(status_code=501, detail=f"LiDAR processing unavailable: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Point cloud processing failed: {exc}") from exc
 
 
 @app.post("/pointcloud", response_model=PointCloudResponse)
@@ -683,20 +933,80 @@ async def pointcloud_analyse(file: UploadFile = File(...)) -> PointCloudResponse
       - Individual tree segments with height and crown radius estimates.
 
     This endpoint implements the core forest inventory pipeline used by
-    airborne LiDAR survey companies.
+    airborne LiDAR survey companies. For large files where holding the HTTP
+    connection open risks a proxy timeout, use `POST /pointcloud/async`
+    (issue #30) and poll `GET /jobs/{job_id}` instead.
     """
     content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
     try:
-        from src.pointcloud import process_las_file
-        result = process_las_file(tmp_path, max_points=settings.max_pointcloud_points)
+        result = await _pointcloud_infer(tmp_path)
         return PointCloudResponse(**result)
-    except ImportError as exc:
-        raise HTTPException(status_code=501, detail=f"LiDAR processing unavailable: {exc}") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Point cloud processing failed: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Async job queue for /segment and /pointcloud (issue #30)
+# ---------------------------------------------------------------------------
+
+async def _run_job(job_id: str, tmp_path: Path, pipeline: Callable[[Path], Awaitable[dict]]) -> None:
+    """Run `pipeline(tmp_path)` in the background and record the outcome in `_jobs`.
+
+    Uses FastAPI's built-in BackgroundTasks (no new infra) per the issue's
+    rough sketch. Not distributed and resets on process restart — the same
+    single-worker caveat that already applies to the rate limiter (#32).
+    """
+    job = _jobs[job_id]
+    try:
+        job.result = await pipeline(tmp_path)
+        job.status = "done"
+    except HTTPException as exc:
+        job.status = "error"
+        job.error = str(exc.detail)
+    except Exception as exc:
+        job.status = "error"
+        job.error = str(exc)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+@app.post("/segment/async", response_model=JobAccepted, status_code=202)
+async def segment_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    confidence_threshold: float = 0.5,
+) -> JobAccepted:
+    """Enqueue a /segment job and return immediately with a `job_id` (issue #30)."""
+    content = await _read_upload_capped(file)
+    tmp_path = _save_upload(file, content)
+    job_id = uuid.uuid4().hex
+    _jobs[job_id] = JobRecord()
+    background_tasks.add_task(_run_job, job_id, tmp_path, lambda p: _segment_infer(p, confidence_threshold))
+    return JobAccepted(job_id=job_id)
+
+
+@app.post("/pointcloud/async", response_model=JobAccepted, status_code=202)
+async def pointcloud_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+) -> JobAccepted:
+    """Enqueue a /pointcloud job and return immediately with a `job_id` (issue #30)."""
+    content = await _read_upload_capped(file)
+    tmp_path = _save_upload(file, content)
+    job_id = uuid.uuid4().hex
+    _jobs[job_id] = JobRecord()
+    background_tasks.add_task(_run_job, job_id, tmp_path, _pointcloud_infer)
+    return JobAccepted(job_id=job_id)
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+def get_job(job_id: str) -> JobStatusResponse:
+    """Poll the status/result of a job enqueued via /segment/async or /pointcloud/async."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return JobStatusResponse(job_id=job_id, status=job.status, result=job.result, error=job.error)
 
 
 # ---------------------------------------------------------------------------
