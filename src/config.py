@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # the /segment guards already account for.
     max_batch_size: int = Field(default=16, alias="MAX_BATCH_SIZE")
 
+    # /segment/async and /pointcloud/async job store — entries older than this
+    # are swept out so `_jobs` can't grow unboundedly over a long-lived process.
+    job_ttl_seconds: float = Field(default=3600.0, alias="JOB_TTL_SECONDS")
+
     # Rate limiting (per-client-IP, sliding 60s window). Heavy endpoints
     # (/segment, /pointcloud, /change-detect) get a lower cap since they are
     # the most memory/CPU expensive on the constrained free-tier deployment.

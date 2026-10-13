@@ -65,10 +65,10 @@ def read_geospatial_rgb(path: Path) -> np.ndarray:
 
     if _HAS_RASTERIO:
         with rasterio.open(path) as src:
-            assert_safe_image_pixels(src.width, src.height, bands=src.count)
             # Only decode the first 3 bands (what we actually use below) so a
             # high band-count GeoTIFF doesn't allocate bands x H x W in memory.
             n_bands = min(3, src.count)
+            assert_safe_image_pixels(src.width, src.height, bands=n_bands)
             data = src.read(indexes=list(range(1, n_bands + 1)))  # (bands, H, W)
     else:
         from PIL import Image

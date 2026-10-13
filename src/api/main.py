@@ -221,6 +221,19 @@ class JobRecord:
 
 _jobs: dict[str, JobRecord] = {}
 
+
+def _evict_expired_jobs() -> None:
+    """Sweep `_jobs` for entries older than `settings.job_ttl_seconds` (issue #37).
+
+    `_jobs` otherwise only grows — nothing else ever deletes an entry, since
+    `GET /jobs/{job_id}` just reads it. Run on each new job creation (cheap,
+    no extra infra/background task needed) rather than on a separate timer.
+    """
+    cutoff = time.time() - settings.job_ttl_seconds
+    expired = [job_id for job_id, job in _jobs.items() if job.created_at < cutoff]
+    for job_id in expired:
+        del _jobs[job_id]
+
 # Serializes access to the classifier / autoencoder / segmentation_model globals.
 # /segment swaps the lightweight models out (sets them to None) to free RAM
 # before loading Mask R-CNN, then reloads them afterwards. Without this lock,
@@ -638,6 +651,7 @@ async def predict_batch(files: list[UploadFile] = File(...)) -> BatchPredictionR
         tmp_paths: list[Path] = []
         tensors: list[torch.Tensor] = []
         valid_filenames: list[str] = []
+        valid_tmp_paths: list[Path] = []
         failed: list[dict] = []
 
         try:
@@ -649,6 +663,7 @@ async def predict_batch(files: list[UploadFile] = File(...)) -> BatchPredictionR
                     tmp_paths.append(tmp_path)
                     tensors.append(preprocess_image(tmp_path, settings.image_size))
                     valid_filenames.append(name)
+                    valid_tmp_paths.append(tmp_path)
                 except HTTPException as exc:
                     failed.append({"filename": name, "error": str(exc.detail)})
                 except Exception as exc:
@@ -663,13 +678,30 @@ async def predict_batch(files: list[UploadFile] = File(...)) -> BatchPredictionR
                 for i in range(probs.shape[0]):
                     p = probs[i]
                     confidence, predicted_index = torch.max(p, dim=0)
+                    low_confidence = float(confidence) < settings.min_confidence
+
+                    # Same OOD plausibility gate as /predict (issue #35): cross-check
+                    # the autoencoder's reconstruction error for this item too, rather
+                    # than only flagging low-confidence predictions as likely_ood.
+                    likely_ood = low_confidence
+                    if autoencoder is not None:
+                        try:
+                            from src.anomaly import compute_anomaly_score
+                            ae_result = compute_anomaly_score(
+                                autoencoder, valid_tmp_paths[i], autoencoder_image_size, device, autoencoder_threshold
+                            )
+                            likely_ood = likely_ood or bool(ae_result.get("is_anomaly", False))
+                        except Exception:
+                            pass
+
                     results.append(
                         PredictionResponse(
                             predicted_class=class_names[int(predicted_index)],
                             confidence=round(float(confidence), 4),
                             probabilities={cn: round(float(p[j]), 4) for j, cn in enumerate(class_names)},
                             entropy=round(predictive_entropy(p.tolist()), 4),
-                            low_confidence=float(confidence) < settings.min_confidence,
+                            low_confidence=low_confidence,
+                            likely_ood=likely_ood,
                         )
                     )
 
@@ -980,6 +1012,7 @@ async def segment_async(
     """Enqueue a /segment job and return immediately with a `job_id` (issue #30)."""
     content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
+    _evict_expired_jobs()
     job_id = uuid.uuid4().hex
     _jobs[job_id] = JobRecord()
     background_tasks.add_task(_run_job, job_id, tmp_path, lambda p: _segment_infer(p, confidence_threshold))
@@ -994,6 +1027,7 @@ async def pointcloud_async(
     """Enqueue a /pointcloud job and return immediately with a `job_id` (issue #30)."""
     content = await _read_upload_capped(file)
     tmp_path = _save_upload(file, content)
+    _evict_expired_jobs()
     job_id = uuid.uuid4().hex
     _jobs[job_id] = JobRecord()
     background_tasks.add_task(_run_job, job_id, tmp_path, _pointcloud_infer)
