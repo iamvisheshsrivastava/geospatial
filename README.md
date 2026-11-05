@@ -53,7 +53,7 @@ Red = pixels that most influenced the "Forest" call; blue = low influence.
 
 The `/anomaly` endpoint implements the methodology from my published paper:
 
-> **V. Srivastava**, "Autoencoder Optimization for Anomaly Detection," *IEEE IJCNN 2024*
+> V. Kumar, **V. Srivastava**, S. Mahjabin, A. Pal, S. Klüttermann, and E. Müller, "Autoencoder Optimization for Anomaly Detection: A Comparative Study with Shallow Algorithms," *IEEE IJCNN 2024*. [DOI: 10.1109/IJCNN60899.2024.10650057](https://doi.org/10.1109/IJCNN60899.2024.10650057)
 
 Specific choices from the paper that are wired into the training code:
 - BCE loss instead of MSE (better gradient signal on coloured imagery)
@@ -74,7 +74,7 @@ Trained on Kaggle (Tesla P100, ~55 minutes total):
 |---|---:|---:|
 | Classifier (ResNet-50, 30 epochs) | **0.9905** | **0.9998** |
 
-The autoencoder was trained with Forest as the normal class. An Industrial patch scores ~0.72 anomaly score vs ~0.69 for a healthy forest patch — enough separation to flag deforestation.
+The autoencoder was trained with Forest as the normal class. In an illustrative comparison, an Industrial patch scores ~0.72 versus ~0.69 for a forest patch. These two sample scores do not establish reliable deforestation detection. That use would require a labeled evaluation, threshold selection, false-positive/false-negative analysis, and testing across acquisition conditions.
 
 ---
 
