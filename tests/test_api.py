@@ -288,3 +288,115 @@ def test_job_not_found_returns_404() -> None:
     client = TestClient(app)
     response = client.get("/jobs/does-not-exist")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# issue #39 — POST /change-detect endpoint unit tests
+# ---------------------------------------------------------------------------
+
+def test_change_detect_happy_path(monkeypatch) -> None:
+    """Happy path: two valid images uploaded -> 200 with change metrics."""
+    def _fake_detect_change(before_path, after_path, image_size, device, threshold):
+        return {
+            "change_score": 0.42,
+            "is_changed": True,
+            "threshold": threshold if threshold is not None else 0.15,
+            "change_map": [[0.1, 0.2], [0.3, 0.4]],
+        }
+
+    monkeypatch.setattr("src.change_detection.detect_change", _fake_detect_change)
+    client = TestClient(app)
+
+    files = {
+        "before": ("before.png", _png_bytes()),
+        "after": ("after.png", _png_bytes()),
+    }
+    # Pass threshold as query parameter
+    response = client.post("/change-detect", files=files, params={"threshold": "0.5"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["change_score"] == 0.42
+    assert payload["is_changed"] is True
+    assert payload["threshold"] == 0.5
+    assert payload["change_map"] == [[0.1, 0.2], [0.3, 0.4]]
+
+    # Also test default threshold (0.15) when omitted
+    files2 = {
+        "before": ("before.png", _png_bytes()),
+        "after": ("after.png", _png_bytes()),
+    }
+    response2 = client.post("/change-detect", files=files2)
+    assert response2.status_code == 200
+    assert response2.json()["threshold"] == 0.15
+
+
+def test_change_detect_rejects_corrupted_upload() -> None:
+    """Non-image garbage payload for either image returns 400."""
+    client = TestClient(app)
+
+    # Corrupted before image
+    files_bad_before = {
+        "before": ("before.png", b"not an image"),
+        "after": ("after.png", _png_bytes()),
+    }
+    resp1 = client.post("/change-detect", files=files_bad_before)
+    assert resp1.status_code == 400
+    assert "Change detection failed" in resp1.json()["detail"]
+
+    # Corrupted after image
+    files_bad_after = {
+        "before": ("before.png", _png_bytes()),
+        "after": ("after.png", b"not an image"),
+    }
+    resp2 = client.post("/change-detect", files=files_bad_after)
+    assert resp2.status_code == 400
+    assert "Change detection failed" in resp2.json()["detail"]
+
+
+def test_change_detect_rejects_oversized_upload(monkeypatch) -> None:
+    """Uploads exceeding max_upload_mb return 413."""
+    from src.api import main
+
+    monkeypatch.setattr(main.settings, "max_upload_mb", 1)
+    client = TestClient(app)
+
+    files = {
+        "before": ("before.png", b"0" * (2 * 1024 * 1024)),
+        "after": ("after.png", _png_bytes()),
+    }
+    response = client.post("/change-detect", files=files)
+    assert response.status_code == 413
+
+
+def test_change_detect_cleans_up_temp_files(monkeypatch) -> None:
+    """Temp files created for uploads are unlinked after request finishes, even on failure."""
+    from src.api import main
+
+    created_paths = []
+    orig_save = main._save_upload
+
+    def _tracking_save(file, content):
+        p = orig_save(file, content)
+        created_paths.append(p)
+        return p
+
+    monkeypatch.setattr(main, "_save_upload", _tracking_save)
+
+    def _failing_detect_change(*args, **kwargs):
+        raise RuntimeError("simulated model failure")
+
+    monkeypatch.setattr("src.change_detection.detect_change", _failing_detect_change)
+    client = TestClient(app)
+
+    files = {
+        "before": ("before.png", _png_bytes()),
+        "after": ("after.png", _png_bytes()),
+    }
+    response = client.post("/change-detect", files=files)
+    assert response.status_code == 400
+
+    # Ensure all created temp files were deleted
+    assert len(created_paths) == 2
+    assert not any(p.exists() for p in created_paths)
+
