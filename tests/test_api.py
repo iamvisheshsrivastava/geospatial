@@ -6,6 +6,7 @@ import torch
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from src.api import main
 from src.api.main import app
 
 
@@ -288,3 +289,18 @@ def test_job_not_found_returns_404() -> None:
     client = TestClient(app)
     response = client.get("/jobs/does-not-exist")
     assert response.status_code == 404
+
+
+def test_openapi_description_endpoint_count_matches_actual_routes() -> None:
+    """
+    Regression guard for #25/#38: the FastAPI description quotes
+    main.ENDPOINT_COUNT, which drifted out of sync twice as endpoints were
+    added without updating the hardcoded number in the description string.
+    Pin it to the actual route count so a future drift fails CI instead of
+    silently going stale on the public /docs page.
+    """
+    client = TestClient(app)
+    openapi = client.get("/openapi.json").json()
+
+    assert len(openapi["paths"]) == main.ENDPOINT_COUNT
+    assert str(main.ENDPOINT_COUNT) in openapi["info"]["description"]

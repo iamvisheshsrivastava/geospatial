@@ -177,13 +177,20 @@ class HealthResponse(BaseModel):
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Single source of truth for the endpoint count quoted in the FastAPI
+# description below, so it can't silently drift out of sync again as
+# endpoints are added (regression of #25; see test_api.py for the guard
+# that keeps this pinned to the actual route count).
+ENDPOINT_COUNT = 14
+
 app = FastAPI(
     title="Satellite Geospatial ML Platform",
     description=(
-        "Eight endpoints for satellite imagery and LiDAR analysis: land-cover "
-        "classification, unsupervised anomaly detection, temporal change detection, "
-        "tree crown segmentation, LiDAR forest inventory, GradCAM explainability, "
-        "spectral indices, and a poverty proxy estimator."
+        f"{ENDPOINT_COUNT} endpoints for satellite imagery and LiDAR analysis: land-cover "
+        "classification (incl. batch), unsupervised anomaly detection, temporal change "
+        "detection, tree crown segmentation, LiDAR forest inventory, GradCAM "
+        "explainability, spectral indices, a poverty proxy estimator, async job "
+        "variants of segmentation/point-cloud, and health/model-listing utilities."
     ),
     version="2.0.0",
 )
