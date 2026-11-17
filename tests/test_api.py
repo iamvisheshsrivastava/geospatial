@@ -288,3 +288,63 @@ def test_job_not_found_returns_404() -> None:
     client = TestClient(app)
     response = client.get("/jobs/does-not-exist")
     assert response.status_code == 404
+
+
+def test_change_detect_happy_path_returns_expected_shape(monkeypatch) -> None:
+    import src.change_detection as change_detection
+
+    monkeypatch.setattr(
+        change_detection,
+        "detect_change",
+        lambda before_path, after_path, image_size, device, threshold: {
+            "change_score": 0.42,
+            "is_changed": True,
+            "threshold": threshold,
+            "change_map": [[0.1, 0.2], [0.3, 0.4]],
+        },
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/change-detect",
+        files={
+            "before": ("before.png", _png_bytes(color=(10, 20, 30)), "image/png"),
+            "after": ("after.png", _png_bytes(color=(200, 50, 60)), "image/png"),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["change_score"] == 0.42
+    assert body["is_changed"] is True
+    assert "threshold" in body
+    assert body["change_map"] == [[0.1, 0.2], [0.3, 0.4]]
+
+
+def test_change_detect_rejects_garbage_upload_with_400(monkeypatch) -> None:
+    """
+    A non-image before/after upload must surface as a clean 400, not a 500.
+
+    detect_change itself loads a real pretrained ResNet-50 encoder, so it's
+    monkeypatched here (not just given garbage bytes) to raise the same kind
+    of decode failure a bad upload would hit, without requiring a model
+    download in CI -- the endpoint's exception-to-400 mapping is what's
+    under test, not image decoding itself.
+    """
+    import src.change_detection as change_detection
+
+    def _raise_decode_error(*_args, **_kwargs):
+        raise ValueError("cannot identify image file")
+
+    monkeypatch.setattr(change_detection, "detect_change", _raise_decode_error)
+    client = TestClient(app)
+
+    response = client.post(
+        "/change-detect",
+        files={
+            "before": ("before.png", b"not an image", "image/png"),
+            "after": ("after.png", _png_bytes(), "image/png"),
+        },
+    )
+
+    assert response.status_code == 400
