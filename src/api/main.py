@@ -526,13 +526,14 @@ def index() -> str:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    # Segmentation is lazy-loaded — report True if checkpoint file exists
-    seg_available = settings.segmentation_path.exists() or bool(settings.s3_segmentation_key)
     return HealthResponse(
         ok=True,
         classifier_loaded=classifier is not None,
         anomaly_detector_loaded=autoencoder is not None,
-        segmentation_loaded=seg_available,
+        # Same check /models uses for segmentation's `loaded` field (#57) --
+        # the old heuristic reported True merely because an S3 key was
+        # *configured*, even if the object never actually downloaded.
+        segmentation_loaded=segmentation_model is not None,
         model_path=str(settings.model_path),
         autoencoder_path=str(settings.autoencoder_path),
         classes=class_names,
