@@ -348,3 +348,15 @@ def test_change_detect_rejects_garbage_upload_with_400(monkeypatch) -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_openapi_description_endpoint_count_matches_actual_paths() -> None:
+    """Regression guard for #38 (and the same class of drift fixed in #25):
+
+    the OpenAPI description's endpoint count must match len(paths), so it
+    can't silently drift out of sync again as endpoints are added.
+    """
+    paths = app.openapi()["paths"]
+    description = app.openapi()["info"]["description"]
+
+    assert str(len(paths)) in description
